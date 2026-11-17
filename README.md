@@ -4,6 +4,8 @@
 
 [GitHub 仓库](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge) · [★ Star](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge) · [🐞 提交 Issue](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge/issues/new) · [npm](https://www.npmjs.com/package/dsh-plugin-dingtalk-bridge)
 
+[![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2Fdsh-plugin-dingtalk-bridge.json)](https://dshopen.org/zh/plugins/dsh-plugin-dingtalk-bridge/) [![npm version](https://img.shields.io/npm/v/dsh-plugin-dingtalk-bridge.svg)](https://www.npmjs.com/package/dsh-plugin-dingtalk-bridge)
+
 ![收件箱面板](docs/images/inbox-panel.png)
 
 ## 功能特性
