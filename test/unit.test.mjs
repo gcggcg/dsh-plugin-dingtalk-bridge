@@ -202,13 +202,13 @@ test('buildSuggestPrompt 携带来源、发送人与上下文', () => {
       { direction: 'in', sender: '李四', text: '排期确认了吗', at: 1 },
       { direction: 'out', text: '今天会给结论', at: 2 },
     ],
-    selfName: '葛春光',
+    selfName: '张三',
   })
-  assert.match(prompt.system, /葛春光/)
+  assert.match(prompt.system, /张三/)
   assert.match(prompt.user, /群聊「产品讨论群」/)
   assert.match(prompt.user, /【发送人】李四/)
   assert.match(prompt.user, /- 李四：排期确认了吗/)
-  assert.match(prompt.user, /- 葛春光：今天会给结论/)
+  assert.match(prompt.user, /- 张三：今天会给结论/)
   assert.match(prompt.user, /这个需求什么时候能上线？/)
   assert.match(prompt.user, /请直接输出 JSON/)
 })
@@ -275,9 +275,9 @@ test('ingest 记录消息源并按事件 id 去重', async () => {
 
 test('ingest 过滤自己发送的消息与不支持的事件类型', () => {
   const service = new DingTalkBridgeService(makeCtx(), { autoSuggest: false })
-  service.state.selfName = '葛春光'
+  service.state.selfName = '张三'
 
-  service.ingest('profile-1', dmEvent({ event_id: 'e-self', sender: '葛春光' }))
+  service.ingest('profile-1', dmEvent({ event_id: 'e-self', sender: '张三' }))
   service.ingest('profile-1', { type: 'user_im_message_reaction', event_id: 'e-react', sender: '张三' })
   service.ingest('profile-1', { type: 'user_im_chat_updated', event_id: 'e-chat', sender: '张三' })
   assert.equal(service.snapshot().messages.length, 0)
@@ -541,9 +541,9 @@ test('读取存档时修正 1970 这类脏时间戳', async () => {
     JSON.stringify({
       version: 1,
       messages: [
-        { id: 'dirty', text: '改了什么', sender: '刘淑静', at: 2026000, status: 'received' },
-        { id: 'future', text: '未来的消息', sender: '刘淑静', at: now + 90 * 86400000, status: 'received' },
-        { id: 'clean', text: '正常时间', sender: '刘淑静', at: now, status: 'received' },
+        { id: 'dirty', text: '改了什么', sender: '李四', at: 2026000, status: 'received' },
+        { id: 'future', text: '未来的消息', sender: '李四', at: now + 90 * 86400000, status: 'received' },
+        { id: 'clean', text: '正常时间', sender: '李四', at: now, status: 'received' },
       ],
     }),
     'utf8',
@@ -573,8 +573,8 @@ test('读取存档后正文与状态不受时间修正影响', async () => {
         {
           id: 'keep',
           text: '有没有配置可以不检验交易日',
-          sender: '刘淑静',
-          senderId: 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii',
+          sender: '李四',
+          senderId: 'openIdLiSi0000000000000000000000',
           conversationId: 'cid-1',
           kind: 'dm',
           status: 'needs-human',
@@ -592,7 +592,7 @@ test('读取存档后正文与状态不受时间修正影响', async () => {
   assert.equal(message.text, '有没有配置可以不检验交易日')
   assert.equal(message.status, 'needs-human')
   assert.equal(message.needsHuman, true)
-  assert.equal(message.senderId, 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii')
+  assert.equal(message.senderId, 'openIdLiSi0000000000000000000000')
   assert.equal(service.snapshot().pendingCount, 1)
 })
 
@@ -610,7 +610,7 @@ test('读取存档时清理旧版 confirmation_required 失败记录', async () 
         {
           id: 'legacy-fail',
           text: 'ok',
-          sender: '刘淑静',
+          sender: '李四',
           kind: 'dm',
           status: 'failed',
           at: Date.now(),
@@ -621,7 +621,7 @@ test('读取存档时清理旧版 confirmation_required 失败记录', async () 
         {
           id: 'real-fail',
           text: '真实失败',
-          sender: '刘淑静',
+          sender: '李四',
           kind: 'dm',
           status: 'failed',
           at: Date.now(),
@@ -680,8 +680,8 @@ test('图片消息只含图片时也会入箱并记下 images', async () => {
   await service.ingest('ding:1', {
     type: 'user_im_message_receive_o2o_all',
     event_id: 'evt-img-1',
-    sender: '刘淑静',
-    sender_open_dingtalk_id: 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii',
+    sender: '李四',
+    sender_open_dingtalk_id: 'openIdLiSi0000000000000000000000',
     conversation_id: 'cid-1',
     content: '[图片消息](mediaId=@mediaAAA)\n[图片消息](mediaId=@mediaBBB)',
     create_time: '2026-11-14 11:31:27',
@@ -701,7 +701,7 @@ test('imageRecognition 关闭时不登记图片', async () => {
   await service.ingest('ding:1', {
     type: 'user_im_message_receive_o2o_all',
     event_id: 'evt-img-2',
-    sender: '刘淑静',
+    sender: '李四',
     content: '[图片消息](mediaId=@mediaCCC)',
   })
   const message = service.snapshot().messages[0]
@@ -713,12 +713,12 @@ test('imageRecognition 关闭时不登记图片', async () => {
 
 test('buildSuggestPrompt 在带图片时提示模型直接看图', () => {
   const prompt = buildSuggestPrompt({
-    record: { kind: 'dm', sender: '刘淑静', text: '看下这个报错', at: Date.now() },
+    record: { kind: 'dm', sender: '李四', text: '看下这个报错', at: Date.now() },
     imageCount: 2,
   })
   assert.match(prompt.user, /附带 2 张图片/)
   const fallback = buildSuggestPrompt({
-    record: { kind: 'dm', sender: '刘淑静', text: '看下这个报错', at: Date.now() },
+    record: { kind: 'dm', sender: '李四', text: '看下这个报错', at: Date.now() },
     imageNote: '（消息含图片，但当前模型不支持图片输入，已忽略图片内容）',
   })
   assert.match(fallback.user, /不支持图片输入/)
@@ -761,8 +761,8 @@ async function readyImageRecord() {
     id: 'evt-img-9',
     messageId: 'msg-img-9',
     kind: 'dm',
-    sender: '刘淑静',
-    senderId: 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii',
+    sender: '李四',
+    senderId: 'openIdLiSi0000000000000000000000',
     conversationId: 'cid-1',
     text: '[图片]',
     at: Date.now(),

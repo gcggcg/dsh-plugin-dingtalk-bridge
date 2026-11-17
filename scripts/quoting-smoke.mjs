@@ -1,7 +1,7 @@
 // 验证 spawnDws 在 Windows 上对含空格/中文/引号的 --text 参数是否原样透传。
 import { runDws } from '../src/host/dws.js'
 
-const target = 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii'
+const target = 'openIdLiSi0000000000000000000000'
 const samples = ['hello world', '中文 空格 测试', '带"引号"的文本', 'a&b test', '换行\n第二行']
 
 for (const text of samples) {

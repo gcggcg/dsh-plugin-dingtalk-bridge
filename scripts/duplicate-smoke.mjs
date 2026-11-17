@@ -4,7 +4,7 @@
 import { runDws, resolveDwsCommand, parseLooseJson } from '../src/host/dws.js'
 import { buildSendArgs, isDuplicateSendFailure } from '../src/host/service.js'
 
-const target = process.argv[2] || 'DZxSz9PvHH4CctQwczX6u2GDUqyKOhmkf'
+const target = process.argv[2] || 'openIdZhangSan000000000000000000'
 const dwsPath = resolveDwsCommand('')
 const record = { id: 'duplicate-smoke-1', kind: 'dm', senderId: target, profile: '' }
 const stamp = new Date().toISOString().slice(11, 19)

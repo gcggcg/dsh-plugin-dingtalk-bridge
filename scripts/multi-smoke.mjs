@@ -6,8 +6,8 @@
  */
 import { DingTalkBridgeService } from '../src/host/service.js'
 
-const SELF_OPEN_ID = 'DZxSz9PvHH4CctQwczX6u2GDUqyKOhmkf'
-const SELF_DM_CID = 'cidCdAtUFzADZo7lvsgSvcb2R2l/cJBcu8E7b5ynB2MITI='
+const SELF_OPEN_ID = 'openIdZhangSan000000000000000000'
+const SELF_DM_CID = 'cidExampleDirectChat000000000000000='
 
 const ctx = {
   get(name) {

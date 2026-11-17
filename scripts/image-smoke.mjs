@@ -34,20 +34,20 @@ const service = new DingTalkBridgeService(ctx, {
   imageRecognition: true,
   imageMax: 4,
 })
-service.state.selfName = '葛春光'
+service.state.selfName = '张三'
 
 const record = {
   id: 'image-smoke',
   messageId,
   kind: 'dm',
-  sender: '刘淑静',
-  senderId: 'D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii',
+  sender: '李四',
+  senderId: 'openIdLiSi0000000000000000000000',
   text: '[图片]',
   conversationId,
   conversationTitle: '',
   at: Date.now(),
   profile: '',
-  sourceKey: 'dm:D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii',
+  sourceKey: 'dm:openIdLiSi0000000000000000000000',
   status: 'received',
   images: [{ mediaId, file: '', mediaType: '', bytes: 0, state: 'pending' }],
   suggestion: null,

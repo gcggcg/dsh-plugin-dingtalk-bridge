@@ -8,7 +8,7 @@ process.env.DSH_HOME = await mkdtemp(join(tmpdir(), 'dingtalk-send-smoke-'))
 
 const { DingTalkBridgeService } = await import('../src/host/service.js')
 
-const SELF_OPEN_ID = process.env.SELF_OPEN_ID || 'DZxSz9PvHH4CctQwczX6u2GDUqyKOhmkf'
+const SELF_OPEN_ID = process.env.SELF_OPEN_ID || 'openIdZhangSan000000000000000000'
 
 const ctx = {
   get(name) {
