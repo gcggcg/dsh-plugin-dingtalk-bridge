@@ -19,7 +19,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.3.5-20261117T1335'
+export const HOST_BUILD = '0.3.6-20261117T1415'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -32,6 +32,27 @@ const HEALTH_INTERVAL = 5 * 60 * 1000
 const MIN_STABLE_MS = 30 * 1000
 const SUGGEST_CONCURRENCY = 2
 const BODY_LIMIT = 64 * 1024
+
+/** dws 的 npm 包名：`npm install -g dingtalk-workspace-cli` 之后就有 `dws` 命令。 */
+const DWS_PACKAGE = 'dingtalk-workspace-cli'
+const DWS_REGISTRY_DEFAULT = 'https://registry.npmjs.org/'
+const INSTALL_TIMEOUT = 300 * 1000
+const INSTALL_LOG_LIMIT = 4000
+
+/** 拼 `npm install -g` 的参数：只在用户点「安装 dws」时才会真正执行。 */
+export function buildInstallArgs({ target = '', registry = DWS_REGISTRY_DEFAULT } = {}) {
+  const version = String(target ?? '').trim().replace(/^v/, '')
+  const spec = version === '' ? DWS_PACKAGE : `${DWS_PACKAGE}@${version}`
+  const source = String(registry ?? '').trim() || DWS_REGISTRY_DEFAULT
+  return ['install', '-g', spec, '--no-fund', '--no-audit', `--registry=${source}`]
+}
+
+/** 判断命令失败是不是「根本没有这个命令」（而不是参数错、未登录之类的业务错误）。 */
+export function looksLikeMissingCommand(text) {
+  return /ENOENT|not recognized|不是内部或外部命令|command not found|无法将.{0,20}识别|No such file/i.test(
+    String(text ?? ''),
+  )
+}
 
 function asBool(value, fallback) {
   return typeof value === 'boolean' ? value : fallback
@@ -301,6 +322,7 @@ export class DingTalkBridgeService {
     this.config = {
       enabled: asBool(config.enabled, true),
       dwsPath: asString(config.dwsPath, 'dws').trim() || 'dws',
+      dwsRegistry: asString(config.dwsRegistry, DWS_REGISTRY_DEFAULT).trim() || DWS_REGISTRY_DEFAULT,
       profiles: asStringArray(config.profiles),
       listenDirect: asBool(config.listenDirect, true),
       listenGroupAt: asBool(config.listenGroupAt, true),
@@ -353,6 +375,19 @@ export class DingTalkBridgeService {
     }
 
     this.tool = { ok: false, version: '', error: '', checkedAt: 0 }
+    // dws 的安装/更新状态：只有用户点「安装 dws」「更新 dws」才会真的执行 npm 命令。
+    this.install = {
+      status: 'unknown',
+      currentVersion: '',
+      latestVersion: '',
+      updateAvailable: false,
+      targetVersion: '',
+      source: '',
+      log: '',
+      latestError: '',
+      checkedAt: 0,
+    }
+    this.installPromise = null
     this.login = { status: 'idle', code: '', url: '', qr: '', startedAt: 0, error: '', message: '' }
     this.loginChild = null
     this.listeners = new Map()
@@ -448,6 +483,8 @@ export class DingTalkBridgeService {
     }
     this.startAllListeners()
     this.refreshVision().catch(() => {})
+    // 顺手查一下 npm 上的最新版本（只查不装），让「更新 dws」按钮能显示目标版本。
+    this.checkLatestDws().catch(() => {})
     this.broadcast()
   }
 
@@ -477,6 +514,168 @@ export class DingTalkBridgeService {
 
   // ------------------------------------------------------------------- 外部命令
 
+  /** 安装/更新 dws 时使用的 npm 源。 */
+  registry() {
+    return String(this.config.dwsRegistry ?? '').trim() || DWS_REGISTRY_DEFAULT
+  }
+
+  setInstall(patch) {
+    this.install = { ...this.install, ...patch, checkedAt: Date.now() }
+    this.broadcast()
+    return this.install
+  }
+
+  /**
+   * 查 npm 上 dingtalk-workspace-cli 的最新版本（只查不装）。
+   * 换源时也走这里，所以界面上「检查更新」按钮可以随时点。
+   */
+  async checkLatestDws() {
+    const base = this.registry().replace(/\/+$/, '')
+    const url = `${base}/${DWS_PACKAGE}/latest`
+    try {
+      const res = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const version = String(data?.version ?? '').trim()
+      if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error('返回里没有版本号')
+      const current = this.install.currentVersion || this.tool.version || ''
+      return this.setInstall({
+        latestVersion: version,
+        latestError: '',
+        updateAvailable: Boolean(current && version !== current && this.tool.ok),
+      })
+    } catch (error) {
+      this.setInstall({ latestError: String(error?.message || error) })
+      return this.install
+    }
+  }
+
+  /** 依次尝试 npm_execpath、node 同目录的 npm、PATH 里的 npm。 */
+  async findNpm() {
+    const candidates = []
+    const execPath = String(process.env.npm_execpath ?? '').trim()
+    if (execPath !== '' && !/\.(?:c|m)?js$/i.test(execPath)) candidates.push(execPath)
+    const nodeDir = dirname(process.execPath)
+    if (process.platform === 'win32') {
+      candidates.push(join(nodeDir, 'npm.cmd'))
+    } else {
+      candidates.push(join(nodeDir, 'bin', 'npm'), join(nodeDir, 'npm'))
+    }
+    candidates.push('npm')
+    for (const candidate of candidates) {
+      const probe = await runDws(candidate, ['--version'], { timeoutMs: 15_000 })
+      if (probe.code === 0 && /\d+\.\d+\.\d+/.test(`${probe.stdout}${probe.stderr}`)) {
+        return candidate
+      }
+    }
+    return ''
+  }
+
+  /** `npm root -g`：全局 node_modules，用来找安装后的包目录。 */
+  async npmGlobalRoot(npm) {
+    const result = await runDws(npm, ['root', '-g'], { timeoutMs: 20_000 })
+    const text = `${result.stdout}`.trim().split(/\r?\n/).filter((line) => line.trim() !== '')
+    return result.code === 0 ? String(text.at(-1) ?? '').trim() : ''
+  }
+
+  /** 用户点「安装 dws」/「更新 dws」才会走到这里。 */
+  async installDws(target = '') {
+    if (this.installPromise) return this.installPromise
+    this.installPromise = this.runInstallDws(String(target ?? '').trim()).finally(() => {
+      this.installPromise = null
+    })
+    return this.installPromise
+  }
+
+  async runInstallDws(target) {
+    const registry = this.registry()
+    const npm = await this.findNpm()
+    if (npm === '') {
+      this.setInstall({
+        status: 'error',
+        source: registry,
+        targetVersion: target,
+        log: '没有找到 npm，无法自动安装 dws。请先安装 Node.js（自带 npm），或在配置项 dwsPath 里填一个已存在的 dws 路径。',
+      })
+      return { ok: false, error: 'npm not found' }
+    }
+
+    this.setInstall({
+      status: 'installing',
+      source: registry,
+      targetVersion: target,
+      log: `正在执行：${npm} ${buildInstallArgs({ target, registry }).join(' ')}`,
+    })
+
+    const args = buildInstallArgs({ target, registry })
+    const result = await runDws(npm, args, { timeoutMs: INSTALL_TIMEOUT })
+    const output = `${result.stdout}\n${result.stderr}`.trim()
+    if (result.code !== 0) {
+      this.setInstall({
+        status: 'error',
+        log: output.slice(-INSTALL_LOG_LIMIT) || describeFailure(result),
+      })
+      return { ok: false, error: describeFailure(result) }
+    }
+
+    const root = await this.npmGlobalRoot(npm)
+    const pkgDir = join(root || join(dirname(process.execPath), 'node_modules'), DWS_PACKAGE)
+    // npm 12 默认会拦掉依赖的 postinstall（钉钉包靠 install.js 准备可执行文件），
+    // 所以这里手动补跑一次 install.js，否则装完可能仍然找不到可用的 dws。
+    let postinstallLog = ''
+    const postinstall = join(pkgDir, 'install.js')
+    try {
+      await readFile(postinstall)
+      const prepared = await runDws(process.execPath, [postinstall], {
+        cwd: pkgDir,
+        timeoutMs: 180_000,
+        env: { ...process.env, DWS_NO_SKILLS: '1' },
+      })
+      postinstallLog = `${prepared.stdout}\n${prepared.stderr}`.trim().slice(-1200)
+      if (prepared.code !== 0) postinstallLog = `install.js 退出码 ${prepared.code}\n${postinstallLog}`
+    } catch {
+      // 没有 install.js 说明这个版本不需要准备步骤。
+    }
+
+    // 有的版本把真正的可执行文件放在 vendor/ 下，优先用它（避免 cmd 垫片再绕一层）。
+    const vendor = join(pkgDir, 'vendor', process.platform === 'win32' ? 'dws.exe' : 'dws')
+    const installed = await runDws(vendor, ['--version'], { timeoutMs: 20_000 })
+    if (installed.code === 0) this.config.dwsPath = vendor
+
+    await this.checkTool()
+    if (!this.tool.ok) {
+      this.setInstall({
+        status: 'error',
+        log: `${output.slice(-INSTALL_LOG_LIMIT)}\n\n${postinstallLog}\n\n安装完成但 dws 仍不可用：${this.tool.error}`.trim(),
+      })
+      return { ok: false, error: this.tool.error }
+    }
+
+    this.setInstall({
+      status: 'ready',
+      currentVersion: this.tool.version,
+      latestVersion: target.replace(/^v/, '') || this.install.latestVersion,
+      updateAvailable: false,
+      log: `已安装 dws v${this.tool.version}（来源：${registry}）`,
+    })
+    await this.refreshProfiles()
+    this.startAllListeners()
+    return { ok: true, version: this.tool.version }
+  }
+
+  /** 「更新 dws」：先查最新版，再按版本号安装。 */
+  async updateDws() {
+    const latest = await this.checkLatestDws()
+    const target = String(latest?.latestVersion ?? '').trim()
+    if (target === '') {
+      return { ok: false, error: latest?.latestError || '查询最新版本失败，请检查网络或 npm 源' }
+    }
+    return this.installDws(target)
+  }
+
   async checkTool() {
     const result = await runDws(this.config.dwsPath, ['--version'], { timeoutMs: 15000 })
     const output = `${result.stdout}\n${result.stderr}`.trim()
@@ -485,6 +684,22 @@ export class DingTalkBridgeService {
       ok: result.code === 0 && version !== '',
       version,
       error: result.code === 0 ? '' : describeFailure(result),
+      checkedAt: Date.now(),
+    }
+    const missing = !this.tool.ok && looksLikeMissingCommand(output)
+    const current = version || this.install.currentVersion || ''
+    this.install = {
+      ...this.install,
+      status: this.tool.ok ? 'ready' : missing ? 'missing' : 'error',
+      currentVersion: current,
+      updateAvailable: Boolean(
+        this.tool.ok && current && this.install.latestVersion && this.install.latestVersion !== current,
+      ),
+      log: this.tool.ok
+        ? this.install.log
+        : missing
+          ? `未检测到 dws 命令（当前配置：${this.config.dwsPath}）。点击「安装 dws」会自动执行 npm install -g ${DWS_PACKAGE}（来源：${this.registry()}）。`
+          : this.tool.error,
       checkedAt: Date.now(),
     }
     return this.tool
@@ -2135,6 +2350,25 @@ export class DingTalkBridgeService {
         return { ok: true }
       }
 
+      case 'install-dws': {
+        const result = await this.installDws(String(payload.version ?? ''))
+        return { ...result, state: this.snapshot() }
+      }
+
+      case 'check-dws-update': {
+        const install = await this.checkLatestDws()
+        return {
+          ok: install.latestError === '',
+          error: install.latestError,
+          state: this.snapshot(),
+        }
+      }
+
+      case 'update-dws': {
+        const result = await this.updateDws()
+        return { ...result, state: this.snapshot() }
+      }
+
       default:
         return { ok: false, error: `unknown action: ${type}` }
     }
@@ -2171,6 +2405,7 @@ export class DingTalkBridgeService {
       build: HOST_BUILD,
       started: this.started,
       tool: this.tool,
+      install: this.install,
       selfName: this.state.selfName,
       currentProfile: this.state.currentProfile,
       profiles: this.state.profiles,

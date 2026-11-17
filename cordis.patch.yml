@@ -3,6 +3,7 @@
       name: dsh-plugin-dingtalk-bridge
       config:
         enabled: true
+        dwsRegistry: https://registry.npmjs.org/
         listenDirect: true
         listenGroupAt: true
         autoReply: false

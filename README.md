@@ -26,6 +26,7 @@
 - **Star / Issue 入口**：面板右上角「使用说明」旁边有 **★ Star** 与 **提交 Issue**，说明卡底部也有同样的链接与 npm 入口，方便反馈问题。
 - **彩色插件图标**：侧边栏与面板标题使用 3D 机器人图标，宿主提供 `GET /icon` 路由，加载失败时回退单色 SVG。
 - **授权与去重**：默认 `loginMode=loopback`（浏览器授权，**不需要授权码**）；`loginReset=true` 时重新授权会先 `dws auth logout --yes` 退出旧组织，只保留本次登录的组织；也支持手动「退出」。
+- **dws 自动检测 / 安装 / 更新**：插件启动时只做检测，不会偷偷装东西。如果这台机器没有 `dws`，面板顶部会出现一条提示，点 **安装 dws** 即自动执行 `npm install -g dingtalk-workspace-cli`（含 npm 12 会拦掉的 `install.js` 准备步骤），装完自动重新检测并开始接收；已装的话点 **检查更新** 能看到 npm 上的最新版本，再点 **更新到 vX** 升级。npm 源可用 `dwsRegistry` 换成国内镜像。
 - **演练模式**：`dryRun=true` 时只预览将发送的内容（`dws --dry-run`），不真正发到钉钉，适合先试跑。
 - **持久化与自愈**：状态存在 `<DSH_HOME>/integrations/dingtalk-bridge/state.json`（tmp + rename 原子写，mode 0600），图片在 `.../media/`；早于 2020 年或超前一天的时间戳重置为当前时间，旧版 `confirmation_required` 失败记录自动清掉。
 
@@ -41,9 +42,9 @@
 | --- | --- |
 | ![确认弹框](docs/images/confirm-modal.png) | ![授权](docs/images/auth-loopback.png) |
 
-| Star / Issue 入口（右上角） |
-| --- |
-| ![Star 与 Issue 入口](docs/images/star-issue.png) |
+| Star / Issue 入口（右上角） | dws 未安装时的自动安装提示 |
+| --- | --- |
+| ![Star 与 Issue 入口](docs/images/star-issue.png) | ![dws 安装提示](docs/images/dws-install.png) |
 
 来源条展开、群 @ 回复气泡、连续多条编号、上下文窗口下拉框：
 
@@ -85,12 +86,13 @@
 
 ## 配置项
 
-共 28 项，可在「设置 → 插件 → 钉钉消息自动化」里可视化编辑（也可直接改 `cordis.patch.yml` 的 `config`）。
+共 29 项，可在「设置 → 插件 → 钉钉消息自动化」里可视化编辑（也可直接改 `cordis.patch.yml` 的 `config`）。
 
 | 配置 | 类型 / 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | bool / `true` | 总开关，关闭后不启动事件监听、不注册路由。 |
-| `dwsPath` | string / `dws` | dws 可执行文件路径；已在 PATH 里就留 `dws`。 |
+| `dwsPath` | string / `dws` | dws 可执行文件路径；已在 PATH 里就留 `dws`。安装成功后插件会自动指向 npm 全局包里的 `vendor/dws.exe`。 |
+| `dwsRegistry` | string / `https://registry.npmjs.org/` | 自动安装 / 更新 dws 时用的 npm 源，只在点「安装 dws」「更新 dws」时生效，可换国内镜像。 |
 | `profiles` | string[] / `[]` | 只监听这些组织（profile 标识）；留空表示跟随 dws 当前登录账号。 |
 | `listenDirect` | bool / `true` | 是否接收私信。 |
 | `listenGroupAt` | bool / `true` | 是否接收群 @ 我的消息。 |
@@ -147,6 +149,8 @@
 
 | 现象 | 处理 |
 | --- | --- |
+| 点授权报错 `'dws' 不是内部或外部命令` / `spawn dws ENOENT` | 这台机器没装 dws。面板顶部会自动出现提示卡，点 **安装 dws** 即执行 `npm install -g dingtalk-workspace-cli`（含被 npm 12 拦掉的 `install.js` 步骤），装完自动重新检测并开始接收；没有 npm 就先装 Node.js，或把 `dwsPath` 指到已有的 dws 可执行文件。 |
+| 想升级 dws | 点提示卡或设置页的 **检查更新**（只查 npm 上的版本），发现新版后点 **更新到 vX**；npm 源慢就改 `dwsRegistry`（如 `https://registry.npmmirror.com/`）。 |
 | 点「钉钉授权」后没有二维码 | **默认 loopback 模式本来就没有二维码**——弹框里是授权说明 + **打开钉钉授权页面** 按钮，浏览器会自动弹出授权页；没弹出就点 **复制链接**。只有 `loginMode=device` 才显示二维码。 |
 | 授权页要求输入授权码 | 说明 `loginMode` 是 `device`（设备流）。改回 `loopback` 并重启 DSH，即浏览器授权、无需授权码。 |
 | 每授权一次「实时监听中 · N 个组织」就多一个 | 钉钉登录态按组织累积。`loginReset: true`（默认）会在重新授权前先 `dws auth logout --yes` 退出全部旧组织，只保留本次登录的组织；想把现有组织清干净就点面板右上 **退出** 再重新授权。 |

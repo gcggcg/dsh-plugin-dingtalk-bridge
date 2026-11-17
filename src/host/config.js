@@ -13,6 +13,10 @@ export const Config = Schema.object({
     .default('dws')
     .description('dws CLI 路径。默认使用 PATH 中的 dws，也可填绝对路径（如 E:\\app\\node\\dws.cmd）。'),
 
+  dwsRegistry: Schema.string()
+    .default('https://registry.npmjs.org/')
+    .description('自动安装 / 更新 dws 时使用的 npm 源（只在点击「安装 dws」「更新 dws」时生效，可用国内镜像加速）。'),
+
   profiles: Schema.array(Schema.string())
     .default([])
     .description('要监听的组织 profile（形如 corpId:userId）。留空表示自动监听当前登录的组织。'),

@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.3.5'
+    const CLIENT_BUILD = '0.3.6'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -159,6 +159,18 @@ window.__ModuleLoader__.load({
 .dsh-dt-srcsearch:focus{border-color:${C.brand}}
 .dsh-dt-notice{margin:0 20px 8px;padding:8px 12px;border-radius:10px;border:1px dashed ${C.border2};
   background:${C.layer2};color:${C.sub};font-size:12px;display:flex;align-items:center;gap:6px}
+.dsh-dt-install{margin:0 20px 12px;padding:12px 14px;border-radius:12px;display:flex;align-items:flex-start;gap:11px;
+  border:1px solid rgba(217,119,6,.32);background:rgba(217,119,6,.07)}
+.dsh-dt-install[data-tone="error"]{border-color:rgba(220,38,38,.32);background:rgba(220,38,38,.07)}
+.dsh-dt-install[data-tone="busy"]{border-color:rgba(31,111,235,.3);background:rgba(31,111,235,.06)}
+.dsh-dt-install-icon{font-size:16px;line-height:22px;flex:none}
+.dsh-dt-install-title{font-size:13px;font-weight:600;color:${C.text};letter-spacing:.2px}
+.dsh-dt-install-body{margin-top:4px;font-size:12.3px;line-height:1.6;color:${C.sub};word-break:break-word}
+.dsh-dt-install-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.dsh-dt-install-log{margin-top:6px;font-size:12px;color:${C.sub}}
+.dsh-dt-install-log summary{cursor:pointer;color:${C.brand}}
+.dsh-dt-install-log pre{margin:6px 0 0;padding:8px 10px;border-radius:8px;background:${C.layer2};
+  border:1px solid ${C.border1};font-size:11.5px;line-height:1.5;max-height:180px;overflow:auto;white-space:pre-wrap}
 .dsh-dt-listbox{margin:0 20px 16px;border:1px solid ${C.border1};border-radius:14px;background:${C.layer1};
   box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;
   height:calc(100vh - 330px);min-height:340px;max-height:900px;overflow:hidden}
@@ -1033,6 +1045,10 @@ window.__ModuleLoader__.load({
         '已登录时按钮变成「重新授权」：默认会先退出已登录的组织再登录新的组织（配置 loginReset），所以始终只监听你本次授权的组织，不会越授权越多；想彻底断开就点旁边的「退出」。',
       ],
       ['接收', '插件自动登录 dws 后订阅「私信」与「群 @我」两类事件，消息到达即刻推送到本页，无需刷新。'],
+      [
+        'dws 环境',
+        '插件依赖 dws CLI 收发钉钉消息。如果这台机器没装 dws，顶部会出现一条提示，点「安装 dws」会自动执行 npm install -g dingtalk-workspace-cli（需要本机有 Node.js），装完自动重新检测并开始接收；已装的话点「检查更新」可以看 npm 上有没有新版本，再点「更新到 vX」升级。npm 源可用配置项 dwsRegistry 换成国内镜像。',
+      ],
       ['消息源', '每条消息记录发送人、来源类型（私信 / 群 @）、群名称与时间；顶部「来源」筛选条按发送人与群聚合统计。'],
       [
         '来源筛选',
@@ -1295,6 +1311,96 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * dws 检测 / 安装 / 更新卡片。
+     * 只有用户点按钮才会真的执行 npm install（插件启动时只做「检测」和「查最新版本」）。
+     */
+    function DwsInstallCard(props) {
+      const install = props.install || {}
+      const tool = props.tool || {}
+      const status = String(install.status || 'unknown')
+      const current = String(install.currentVersion || tool.version || '')
+      const latest = String(install.latestVersion || '')
+      const updateAvailable = Boolean(status === 'ready' && latest && current && latest !== current)
+      const ready = Boolean(tool.ok)
+      if (ready && !updateAvailable) return null
+
+      const source = String(install.source || '配置的 npm 源')
+      const busy = props.busy || ''
+      const installing = status === 'installing' || busy === 'install-dws' || busy === 'update-dws'
+      const failed = status === 'error'
+      const tone = failed ? C.error : installing ? C.brand : C.warn
+
+      const headline = installing
+        ? `正在安装 dws${install.targetVersion ? ` v${install.targetVersion}` : ''}…`
+        : failed
+          ? 'dws 安装 / 更新失败'
+          : ready
+            ? `发现新版本 dws v${latest}（当前 v${current}）`
+            : '未检测到 dws 命令'
+
+      const body = installing
+        ? '安装过程通常需要 10~60 秒，完成后会自动重新检测并开始接收消息。'
+        : failed
+          ? String(install.log || tool.error || '安装失败，请查看下面的日志。').slice(0, 600)
+          : ready
+            ? `更新后会重启监听，登录状态不受影响。安装来源：${source}`
+            : `这个插件通过 dws CLI 收发钉钉消息。点「安装 dws」会自动执行 npm install -g dingtalk-workspace-cli（来源：${source}），需要本机已安装 Node.js。`
+
+      return h(
+        'div',
+        { className: 'dsh-dt-install', 'data-tone': failed ? 'error' : installing ? 'busy' : 'warn' },
+        h('div', { className: 'dsh-dt-install-icon', style: { color: tone } }, installing ? '⏳' : failed ? '⚠' : '📦'),
+        h(
+          'div',
+          { style: { minWidth: 0, flex: 1 } },
+          h('div', { className: 'dsh-dt-install-title' }, headline),
+          h('div', { className: 'dsh-dt-install-body' }, body),
+          failed && install.log && install.log.length > 600
+            ? h('details', { className: 'dsh-dt-install-log' }, h('summary', null, '查看完整日志'), h('pre', null, install.log))
+            : null,
+          install.latestError
+            ? h('div', { className: 'dsh-dt-install-body', style: { opacity: 0.75 } }, `查询最新版本失败：${install.latestError}`)
+            : null,
+        ),
+        h(
+          'div',
+          { className: 'dsh-dt-install-actions' },
+          ready && updateAvailable
+            ? h(
+                Button,
+                {
+                  size: 'sm',
+                  variant: 'primary',
+                  disabled: installing,
+                  onClick: props.onUpdate,
+                  title: `更新到 v${latest}`,
+                },
+                installing ? '更新中…' : `更新到 v${latest}`,
+              )
+            : null,
+          !ready
+            ? h(
+                Button,
+                {
+                  size: 'sm',
+                  variant: 'primary',
+                  disabled: installing,
+                  onClick: props.onInstall,
+                  title: '执行 npm install -g dingtalk-workspace-cli',
+                },
+                installing ? '安装中…' : '安装 dws',
+              )
+            : null,
+          h(
+            Button,
+            { size: 'sm', variant: 'ghost', disabled: installing || busy === 'check-dws-update', onClick: props.onCheck },
+            busy === 'check-dws-update' ? '检查中…' : '检查更新',
+          ),
+        ),
+      )
+    }
+
     function InboxPanel() {
       const { state, error } = useBridge()
       const [tab, setTab] = useState('all')
@@ -1305,6 +1411,7 @@ window.__ModuleLoader__.load({
       const [thresholdDraft, setThresholdDraft] = useState(null)
       const [pendingThreshold, setPendingThreshold] = useState(null)
       const [thresholdError, setThresholdError] = useState('')
+      const [installBusy, setInstallBusy] = useState('')
 
       const messages = useMemo(() => (state && Array.isArray(state.messages) ? state.messages : []), [state])
       const autoReply = Boolean(state && state.autoReply)
@@ -1575,6 +1682,27 @@ window.__ModuleLoader__.load({
           ),
           h('span', { className: 'dsh-dt-footnote' }, '欢迎点赞或反馈问题'),
         ),
+
+        h(DwsInstallCard, {
+          install: state && state.install,
+          tool: state && state.tool,
+          busy: installBusy,
+          onInstall: () => {
+            setInstallBusy('install-dws')
+            postAction({ type: 'install-dws' }).finally(() => setInstallBusy(''))
+          },
+          onUpdate: () => {
+            const target = String((state && state.install && state.install.latestVersion) || '')
+            const source = String((state && state.install && state.install.source) || '配置的 npm 源')
+            if (!window.confirm(`将更新 dingtalk-workspace-cli 到 v${target}（来源：${source}），是否继续？`)) return
+            setInstallBusy('update-dws')
+            postAction({ type: 'update-dws' }).finally(() => setInstallBusy(''))
+          },
+          onCheck: () => {
+            setInstallBusy('check-dws-update')
+            postAction({ type: 'check-dws-update' }).finally(() => setInstallBusy(''))
+          },
+        }),
 
         helpOpen ? null : h(
           'div',
@@ -2331,6 +2459,28 @@ window.__ModuleLoader__.load({
             : '—',
         ],
         ['dws 版本', state && state.tool && state.tool.version ? state.tool.version : '未检测到'],
+        [
+          'dws 安装状态',
+          state && state.install
+            ? state.install.status === 'ready'
+              ? `已就绪（v${state.install.currentVersion || state.tool?.version || '?'}）${
+                  state.install.latestVersion && state.install.latestVersion !== state.install.currentVersion
+                    ? `，npm 上最新 v${state.install.latestVersion}`
+                    : ''
+                }`
+              : state.install.status === 'installing'
+                ? `安装中（${state.install.targetVersion ? `v${state.install.targetVersion}，` : ''}${state.install.source || '...'}）`
+                : state.install.status === 'missing'
+                  ? '未安装（可点上方「安装 dws」自动安装）'
+                  : state.install.status === 'error'
+                    ? '安装 / 更新失败（可查看日志后重试）'
+                    : '检测中'
+            : '—',
+        ],
+        [
+          'npm 安装源',
+          state && state.install && state.install.source ? state.install.source : 'https://registry.npmjs.org/',
+        ],
         [
           '宿主版本',
           state && state.build

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { DingTalkBridgeService, buildSendArgs, composeReplyBody, detectMessageKind, extractEventText, extractImageRefs, isDuplicateSendFailure, sniffImageMediaType, stripImageMarkers, planReplyParts } from '../src/host/service.js'
+import { DingTalkBridgeService, buildSendArgs, composeReplyBody, detectMessageKind, extractEventText, extractImageRefs, buildInstallArgs, isDuplicateSendFailure, looksLikeMissingCommand, sniffImageMediaType, stripImageMarkers, planReplyParts } from '../src/host/service.js'
 import { buildSuggestPrompt, buildStreamOptions, cleanReply, parseSuggestion } from '../src/host/suggest.js'
 import { createLineReader, describeFailure, parseLooseJson } from '../src/host/dws.js'
 
@@ -1322,4 +1322,56 @@ test('buildSendArgs 连续多条时每条用不同的幂等键', () => {
   assert.equal(keyOf(first), 'dsh-dingtalk-evt-multi')
   assert.equal(keyOf(second), 'dsh-dingtalk-evt-multi-p2')
   assert.equal(keyOf(third), 'dsh-dingtalk-evt-multi-p3-r2')
+})
+
+test('buildInstallArgs 拼出 npm 全局安装命令（可指定版本与源）', () => {
+  assert.deepEqual(buildInstallArgs({ target: '1.0.68', registry: 'https://registry.npmmirror.com/' }), [
+    'install',
+    '-g',
+    'dingtalk-workspace-cli@1.0.68',
+    '--no-fund',
+    '--no-audit',
+    '--registry=https://registry.npmmirror.com/',
+  ])
+  // 不带版本号时安装 latest，`v` 前缀会被去掉，源为空时回退官方源。
+  assert.deepEqual(buildInstallArgs({ target: 'v1.0.70', registry: '  ' }), [
+    'install',
+    '-g',
+    'dingtalk-workspace-cli@1.0.70',
+    '--no-fund',
+    '--no-audit',
+    '--registry=https://registry.npmjs.org/',
+  ])
+  assert.equal(buildInstallArgs({})[2], 'dingtalk-workspace-cli')
+})
+
+test('looksLikeMissingCommand 能识别各平台的「命令不存在」提示', () => {
+  assert.equal(looksLikeMissingCommand("'dws' 不是内部或外部命令，也不是可运行的程序或批处理文件。"), true)
+  assert.equal(looksLikeMissingCommand('spawn dws ENOENT'), true)
+  assert.equal(looksLikeMissingCommand('bash: dws: command not found'), true)
+  assert.equal(looksLikeMissingCommand('无法将“dws”项识别为 cmdlet'), true)
+  // 业务错误不能被误判成「没装」。
+  assert.equal(looksLikeMissingCommand('未找到已登录的钉钉组织'), false)
+  assert.equal(looksLikeMissingCommand(''), false)
+})
+
+test('dws 缺失时 checkTool 把安装状态标成 missing，并给出安装提示', async () => {
+  await useFreshHome()
+  const service = new DingTalkBridgeService(makeCtx(), {
+    dwsPath: 'dws-command-that-does-not-exist-xyz',
+    autoSuggest: false,
+    autoReply: false,
+    dwsRegistry: 'https://registry.npmmirror.com/',
+  })
+  const tool = await service.checkTool()
+  assert.equal(tool.ok, false)
+  assert.equal(service.install.status, 'missing')
+  assert.match(service.install.log, /未检测到 dws/)
+  assert.match(service.install.log, /安装 dws/)
+  assert.match(service.install.log, /registry\.npmmirror\.com/)
+
+  const snap = service.snapshot()
+  assert.equal(snap.install.status, 'missing')
+  assert.equal(snap.install.currentVersion, '')
+  assert.equal(snap.tool.ok, false)
 })
