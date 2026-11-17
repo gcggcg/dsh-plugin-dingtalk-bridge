@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.4.0'
+    const CLIENT_BUILD = '0.4.1'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -298,7 +298,7 @@ window.__ModuleLoader__.load({
   margin:12px 20px;box-sizing:border-box}
 .dsh-dt-kv{display:grid;grid-template-columns:150px 1fr;gap:8px 14px;font-size:12.5px;margin-top:12px}
 .dsh-dt-kv dt{color:${C.sub}}
-.dsh-dt-kv dd{margin:0;color:${C.text};word-break:break-word}
+.dsh-dt-kv dd{margin:0;color:${C.text};word-break:break-word;overflow-wrap:anywhere}
 @keyframes dsh-dt-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes dsh-dt-fade{from{opacity:0}to{opacity:1}}
 @keyframes dsh-dt-rise{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
@@ -2559,6 +2559,10 @@ window.__ModuleLoader__.load({
               ? '免 npm（直接下载安装包解压）'
               : 'npm 全局安装'
             : '—',
+        ],
+        [
+          'dws 路径',
+          state && state.dwsPath ? state.dwsPath : '—',
         ],
         [
           'npm 安装源',

@@ -1369,7 +1369,8 @@ test('dws 缺失时 checkTool 把安装状态标成 missing，并给出安装提
     autoReply: false,
     dwsRegistry: 'https://registry.npmmirror.com/',
   })
-  const tool = await service.checkTool()
+  // discover:false —— 这台机器上可能真的装了 dws，这里只验「配置的路径不可用」时的判定。
+  const tool = await service.checkTool({ discover: false })
   assert.equal(tool.ok, false)
   assert.equal(service.install.status, 'missing')
   assert.match(service.install.log, /未检测到 dws/)
@@ -1477,7 +1478,7 @@ test('dws 不可用时点授权会先提示安装 dws，而不是直接报命令
     autoReply: false,
     dwsPath: 'dws-not-installed-for-test',
   })
-  await service.checkTool()
+  await service.checkTool({ discover: false })
   const result = await service.startLogin()
   assert.equal(result.ok, false)
   assert.equal(service.snapshot().login.status, 'failed')
@@ -1540,4 +1541,40 @@ test('extractTarGz 支持解压进度回调', async () => {
   const files = await extractTarGz(makeTarball([['package/a.txt', 'aaa']]), dir, (count) => seen.push(count))
   assert.equal(files.length, 1)
   assert.deepEqual(seen, [], '文件数不足 50 时不回调，避免刷屏')
+})
+
+test('dws 装在插件数据目录时，即使 dwsPath 丢了也能自己找回来', { skip: process.platform !== 'win32' }, async () => {
+  const home = await useFreshHome()
+  const vendorDir = join(home, 'integrations', 'dingtalk-bridge', 'dws-runtime', 'node_modules', 'dingtalk-workspace-cli', 'vendor')
+  await mkdir(vendorDir, { recursive: true })
+  const stub = join(vendorDir, 'dws.cmd')
+  await writeFile(stub, '@echo off\r\necho dws version 1.0.68\r\n', 'utf8')
+
+  const service = new DingTalkBridgeService(makeCtx(), { dwsPath: FAKE_DWS, autoSuggest: false, autoReply: false })
+
+  // 候选清单里，插件数据目录排在「全局 node_modules」之前（先找自己装的）。
+  const candidates = service.dwsCandidates()
+  assert.equal(
+    candidates[1],
+    join(vendorDir, 'dws.exe'),
+  )
+  assert.equal(candidates[candidates.length - 1], 'dws')
+
+  // 只看我们自己造的这份候选（避免真的去跑机器上已装的 dws，结果受环境影响）。
+  service.dwsCandidates = () => [stub]
+  const tool = await service.checkTool()
+
+  assert.equal(tool.ok, true)
+  assert.equal(tool.version, '1.0.68')
+  assert.equal(service.config.dwsPath, stub)
+  assert.equal(service.snapshot().dwsPath, stub)
+  assert.ok(service.snapshot().dwsRuntimeDir.endsWith(join('dws-runtime', 'node_modules', 'dingtalk-workspace-cli')))
+
+  // 找回的路径要落盘，重启后不用再找一遍。
+  const saved = JSON.parse(await readFile(join(home, 'integrations', 'dingtalk-bridge', 'state.json'), 'utf8'))
+  assert.equal(saved.dwsPath, stub)
+
+  const again = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  await again.loadState()
+  assert.equal(again.config.dwsPath, stub)
 })

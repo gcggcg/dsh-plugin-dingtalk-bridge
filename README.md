@@ -26,7 +26,7 @@
 - **Star / Issue 入口**：面板右上角「使用说明」旁边有 **★ Star** 与 **提交 Issue**，说明卡底部也有同样的链接与 npm 入口，方便反馈问题。
 - **彩色插件图标**：侧边栏与面板标题使用 3D 机器人图标，宿主提供 `GET /icon` 路由，加载失败时回退单色 SVG。
 - **授权与去重**：默认 `loginMode=loopback`（浏览器授权，**不需要授权码**）；`loginReset=true` 时重新授权会先 `dws auth logout --yes` 退出旧组织，只保留本次登录的组织；也支持手动「退出」。
-- **dws 自动检测 / 安装 / 更新**：插件启动时只做检测，不会偷偷装东西。如果这台机器没有 `dws`，面板顶部会出现一条提示，点 **安装 dws** 即自动安装：有 npm 时执行 `npm install -g dingtalk-workspace-cli`（含 npm 12 会拦掉的 `install.js` 准备步骤），**没有 npm 时直接下载 npm 包 tarball 解压到插件数据目录**（自带纯 Node 解压器，不依赖系统 tar），两条路径都会自动定位 `vendor/dws.exe`。已装的话点 **检查更新** 能看到最新版本，再点 **更新到 vX** 升级。收件箱提示卡与设置页按钮都能触发，npm 源可用 `dwsRegistry` 换成国内镜像。
+- **dws 自动检测 / 安装 / 更新**：插件启动时只做检测，不会偷偷装东西。如果这台机器没有 `dws`，面板顶部会出现一条提示，点 **安装 dws** 即自动安装：有 npm 时执行 `npm install -g dingtalk-workspace-cli`（含 npm 12 会拦掉的 `install.js` 准备步骤），**没有 npm 时直接下载 npm 包 tarball 解压到插件数据目录**（自带纯 Node 解压器，不依赖系统 tar），两条路径都会自动定位 `vendor/dws.exe`。已装的话点 **检查更新** 能看到最新版本，再点 **更新到 vX** 升级。收件箱提示卡与设置页按钮都能触发，npm 源可用 `dwsRegistry` 换成国内镜像。安装过程分五步展示进度与耗时，tarball 会本地缓存，同版本重装秒完成；**卸载插件再装回来也不会误报「未安装」**——配置路径不可用时会自动去插件数据目录、npm 全局目录、PATH 里找一遍。
 - **安装进度可见**：安装时卡片会显示 **五步清单**（读取版本信息 → 下载安装包 → 解压 → 准备可执行文件 → 校验版本），每步带 ✓/◐/○ 与耗时，下载实时显示 MB 与百分比，标题还带「已用时 Ns」；同一版本重复安装直接命中 `dws-cache` 缓存。
 - **「没登录」不等于「dws 坏了」**：dws 可用但还没登录时，面板显示黄点「未登录钉钉 · 点右上角「钉钉授权」」，授权入口照常可用（0.4.0 修掉了旧版 `dws not ready` 死循环）。
 - **演练模式**：`dryRun=true` 时只预览将发送的内容（`dws --dry-run`），不真正发到钉钉，适合先试跑。
@@ -124,7 +124,7 @@ npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies
 | 配置 | 类型 / 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | bool / `true` | 总开关，关闭后不启动事件监听、不注册路由。 |
-| `dwsPath` | string / `dws` | dws 可执行文件路径；已在 PATH 里就留 `dws`。安装成功后插件会自动指向 npm 全局包里的 `vendor/dws.exe`。 |
+| `dwsPath` | string / `dws` | dws 可执行文件路径；已在 PATH 里就留 `dws`。安装成功后插件会自动指向 `vendor/dws.exe`（并写进 `state.json`）；这个值不可用时插件会自动在常见安装位置里找回已装的 dws。 |
 | `dwsRegistry` | string / `https://registry.npmjs.org/` | 自动安装 / 更新 dws 时用的 npm 源，只在点「安装 dws」「更新 dws」时生效，可换国内镜像。 |
 | `profiles` | string[] / `[]` | 只监听这些组织（profile 标识）；留空表示跟随 dws 当前登录账号。 |
 | `listenDirect` | bool / `true` | 是否接收私信。 |
@@ -184,6 +184,7 @@ npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies
 | --- | --- |
 | 点授权报错 `'dws' 不是内部或外部命令` / `spawn dws ENOENT` | 这台机器没装 dws。点「钉钉授权」时插件会先拦住并提示去安装；在提示卡或设置页点 **安装 dws** 即可：有 npm 走全局安装，**没有 npm 也能装**（直接下载 npm 包解压，自带解压器，并借用 DSH 自带的 Node 跑 `install.js`）。装完自动重新检测并开始接收。 |
 | 想升级 dws | 点提示卡或设置页的 **检查更新**（只查 npm 上的版本），发现新版后点 **更新到 vX**；npm 源慢就改 `dwsRegistry`（如 `https://registry.npmmirror.com/`）。 |
+| 卸载插件再装回来，又说「未安装 dws」 | 0.4.1 起会自动找回：`dws --version` 失败时插件会依次探测「配置的 `dwsPath` → 插件数据目录 `dws-runtime/…/vendor` → Node 同目录 `node_modules` → `%APPDATA%\npm` / `Program Files\nodejs`（macOS/Linux 为 `/usr/local/lib`、`/opt/homebrew/lib`、`/usr/lib`）→ PATH → `npm root -g`」，命中就写回 `dwsPath` 并落盘。装在哪、怎么彻底重装见使用说明 **10.0.1**；设置页「dws 路径」一行显示实际使用的可执行文件。 |
 | 点「钉钉授权」后没有二维码 | **默认 loopback 模式本来就没有二维码**——弹框里是授权说明 + **打开钉钉授权页面** 按钮，浏览器会自动弹出授权页；没弹出就点 **复制链接**。只有 `loginMode=device` 才显示二维码。 |
 | 授权页要求输入授权码 | 说明 `loginMode` 是 `device`（设备流）。改回 `loopback` 并重启 DSH，即浏览器授权、无需授权码。 |
 | 每授权一次「实时监听中 · N 个组织」就多一个 | 钉钉登录态按组织累积。`loginReset: true`（默认）会在重新授权前先 `dws auth logout --yes` 退出全部旧组织，只保留本次登录的组织；想把现有组织清干净就点面板右上 **退出** 再重新授权。 |

@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.4.0-20261117T1645'
+export const HOST_BUILD = '0.4.1-20261117T1810'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -651,6 +651,68 @@ export class DingTalkBridgeService {
     return join(this.dataDir(), 'dws-runtime', 'node_modules', DWS_PACKAGE)
   }
 
+  /** 平台上的 dws 可执行文件名。 */
+  dwsExeName() {
+    return process.platform === 'win32' ? 'dws.exe' : 'dws'
+  }
+
+  /**
+   * 可能藏着 dws 的位置（按「便宜的先试」排序）。
+   * 为什么要这份清单：dws 可能装在 npm 全局目录、也可能装在插件数据目录，
+   * 而全局目录通常**不在 PATH 里**。卸载插件再装回来时 state.json 里的 dwsPath 会丢，
+   * 只靠 PATH 就会误报「未安装」——所以启动时要把这些位置都探一遍。
+   */
+  dwsCandidates() {
+    const exe = this.dwsExeName()
+    const vendor = (root) => join(root, DWS_PACKAGE, 'vendor', exe)
+    const list = []
+    const configured = String(this.config.dwsPath ?? '').trim()
+    if (configured !== '' && configured !== 'dws') list.push(configured)
+    list.push(join(this.runtimePackageDir(), 'vendor', exe))
+    const nodeDir = dirname(process.execPath)
+    list.push(vendor(join(nodeDir, 'node_modules')))
+    list.push(vendor(join(nodeDir, '..', 'lib', 'node_modules')))
+    if (process.platform === 'win32') {
+      if (process.env.APPDATA) list.push(vendor(join(process.env.APPDATA, 'npm', 'node_modules')))
+      const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files'
+      list.push(vendor(join(programFiles, 'nodejs', 'node_modules')))
+      const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
+      list.push(vendor(join(programFilesX86, 'nodejs', 'node_modules')))
+    } else {
+      for (const root of ['/usr/local/lib/node_modules', '/opt/homebrew/lib/node_modules', '/usr/lib/node_modules']) {
+        list.push(vendor(root))
+      }
+    }
+    // 最后才试 PATH 里的 dws（配置里显式写了别的路径时也兜底）。
+    list.push('dws')
+    return [...new Set(list.filter((item) => item !== ''))]
+  }
+
+  /** 挨个试候选路径，返回第一个能跑出 `x.y.z` 的。 */
+  async discoverDws() {
+    for (const candidate of this.dwsCandidates()) {
+      // 明确是文件路径的，先看文件在不在——省掉一次进程启动（找不到时这步最费时间）。
+      if (candidate !== 'dws' && !existsSync(candidate)) continue
+      const probe = await runDws(candidate, ['--version'], { timeoutMs: 8000 })
+      const version = /(\d+\.\d+\.\d+)/.exec(`${probe.stdout}\n${probe.stderr}`)?.[1] || ''
+      if (probe.code === 0 && version !== '') return { command: candidate, version }
+    }
+    // 还有一处：npm 全局目录（prefix 可能不在上面这些常见位置）。
+    const npm = await this.findNpm()
+    if (npm !== '') {
+      const root = await this.npmGlobalRoot(npm)
+      if (root !== '') {
+        const candidate = join(root, DWS_PACKAGE, 'vendor', this.dwsExeName())
+        if (existsSync(candidate)) {
+          const probe = await runDws(candidate, ['--version'], { timeoutMs: 8000 })
+          const version = /(\d+\.\d+\.\d+)/.exec(`${probe.stdout}\n${probe.stderr}`)?.[1] || ''
+          if (probe.code === 0 && version !== '') return { command: candidate, version }
+        }
+      }
+    }
+    return null
+  }
+
 
   /** `npm root -g`：全局 node_modules，用来找安装后的包目录。 */
   async npmGlobalRoot(npm) {
@@ -920,7 +982,7 @@ export class DingTalkBridgeService {
     return this.installDws(target)
   }
 
-  async checkTool() {
+  async checkTool({ discover = true } = {}) {
     const result = await runDws(this.config.dwsPath, ['--version'], { timeoutMs: 15000 })
     const output = `${result.stdout}\n${result.stderr}`.trim()
     const version = /(\d+\.\d+\.\d+)/.exec(output)?.[1] || ''
@@ -929,6 +991,17 @@ export class DingTalkBridgeService {
       version,
       error: result.code === 0 ? '' : describeFailure(result),
       checkedAt: Date.now(),
+    }
+    // 配置里的路径不可用时，去常见位置找一遍：卸载重装后 state.json 会丢 dwsPath，
+    // 而 npm 全局目录通常不在 PATH 里，不主动找就会误报「未安装」。
+    if (!this.tool.ok && discover) {
+      const found = await this.discoverDws()
+      if (found && found.command !== this.config.dwsPath) {
+        this.config.dwsPath = found.command
+        await this.saveState()
+        this.noteRequest('DISCOVER', ROUTE_PREFIX, 200, found.command)
+        return this.checkTool({ discover: false })
+      }
     }
     const missing = !this.tool.ok && looksLikeMissingCommand(output)
     const current = version || this.install.currentVersion || ''
@@ -2674,6 +2747,9 @@ export class DingTalkBridgeService {
       started: this.started,
       tool: this.tool,
       install: this.install,
+      dwsPath: this.config.dwsPath,
+      dwsRuntimeDir: this.runtimePackageDir(),
+      dwsCacheDir: join(this.dataDir(), 'dws-cache'),
       selfName: this.state.selfName,
       currentProfile: this.state.currentProfile,
       profiles: this.state.profiles,
