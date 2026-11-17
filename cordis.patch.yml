@@ -1,0 +1,23 @@
+- insert:
+    - id: dingtalk-bridge
+      name: dsh-plugin-dingtalk-bridge
+      config:
+        enabled: true
+        listenDirect: true
+        listenGroupAt: true
+        autoReply: false
+        autoSuggest: true
+        minConfidence: 0.72
+        contextMessages: 6
+        windowMessages: 5
+        remoteContext: true
+        remoteContextLimit: 10
+        imageRecognition: true
+        imageMax: 2
+        loginMode: loopback
+        loginReset: true
+        groupReplyAt: true
+        multiSend: true
+        multiSendMax: 5
+        multiSendDelayMs: 600
+        dryRun: false

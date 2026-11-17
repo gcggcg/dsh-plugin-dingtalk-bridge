@@ -1,0 +1,14 @@
+﻿import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.DSH_HOME = await mkdtemp(join(tmpdir(), "dt-remote-"));
+const { DingTalkBridgeService } = await import("../src/host/service.js");
+const svc = new DingTalkBridgeService({ get: () => null }, { enabled: true, dwsPath: "dws", remoteContext: true, remoteContextLimit: 10, contextMessages: 10 });
+svc.state.selfName = "葛春光";
+const record = { id: "r1", kind: "dm", sender: "刘淑静", senderId: "D7FTg3T2s4CTriiEXrnxMqIVhqzjqiiyziSii", conversationId: "cidCdAtUFzADZo7lvsgSvcb2R2l/cJBcu8E7b5ynB2MITI=", at: Date.now(), text: "x", reply: null };
+const remote = await svc.remoteHistory(record);
+console.log("remote count:", remote.length);
+console.log(JSON.stringify(remote.slice(-3)));
+const history = await svc.buildHistory(record);
+console.log("merged history:", history.length);
+console.log(history.slice(-2).map((h) => `${h.direction}:${h.text.slice(0, 24)}`).join(" | "));

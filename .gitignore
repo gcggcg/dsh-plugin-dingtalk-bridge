@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地运行时产物（状态、图片缓存、调试日志）
+state.json
+http-debug.log
+media/
+
+# 探针与临时脚本
+.render-probe/
+*.tmp

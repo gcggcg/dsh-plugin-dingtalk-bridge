@@ -1,0 +1,80 @@
+{
+  "name": "dsh-plugin-dingtalk-bridge",
+  "version": "0.3.2",
+  "private": false,
+  "type": "module",
+  "description": "钉钉私信 / 群 @ 消息实时接收、按发送人记录来源、AI 建议回复与自动回复插件",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dingtalk",
+    "auto-reply",
+    "assistant",
+    "im"
+  ],
+  "license": "MIT",
+  "author": "gcggcg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gcggcg/dsh-plugin-dingtalk-bridge.git"
+  },
+  "homepage": "https://github.com/gcggcg/dsh-plugin-dingtalk-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/gcggcg/dsh-plugin-dingtalk-bridge/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./icon.png": "./icon.png"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "icon.png",
+    "icon-128.png",
+    "icon-64.png",
+    "README.md",
+    "docs",
+    "LICENSE"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.3 <0.3.0-0",
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "qrcode": "^1.5.4"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node --check src/host/service.js && node --check src/host/dws.js && node --check src/host/suggest.js",
+    "test": "node test/unit.test.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:index": "node scripts/smoke-index.mjs",
+    "smoke:login": "node scripts/login-smoke.mjs",
+    "smoke:quoting": "node scripts/quoting-smoke.mjs",
+    "smoke:send": "node scripts/send-smoke.mjs",
+    "smoke:image": "node scripts/image-smoke.mjs",
+    "pack:check": "npm pack --dry-run",
+    "smoke:duplicate": "node scripts/duplicate-smoke.mjs",
+    "smoke:multi": "node scripts/multi-smoke.mjs"
+  }
+}

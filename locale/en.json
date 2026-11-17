@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DingTalk Automation",
+    "description": "Receive DingTalk DMs and group @mentions in real time, record the source of every message, and reply with AI suggestions or automatic answers."
+  }
+}
