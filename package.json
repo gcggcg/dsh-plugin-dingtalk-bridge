@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-dingtalk-bridge",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": false,
   "type": "module",
   "description": "钉钉私信 / 群 @ 消息实时接收、按发送人记录来源、AI 建议回复与自动回复插件",
