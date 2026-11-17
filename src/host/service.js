@@ -1,4 +1,5 @@
 import { readFile, writeFile, rename, mkdir, unlink, appendFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -19,7 +20,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.3.6-20261117T1415'
+export const HOST_BUILD = '0.3.7-20261117T1445'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -2542,6 +2543,13 @@ export class DingTalkBridgeService {
         if (typeof payload.windowMessages === 'number' && payload.windowMessages >= 2 && payload.windowMessages <= 20) {
           this.config.windowMessages = Math.round(payload.windowMessages)
         }
+        // 上次自动安装记下的 dws 路径：只在用户没显式配置（仍为默认 'dws'）时采用，
+        // 并且必须真的存在，否则继续用 PATH 里的 dws。
+        if (typeof payload.dwsPath === 'string' && payload.dwsPath.trim() !== '') {
+          const saved = payload.dwsPath.trim()
+          const configured = this.config.dwsPath
+          if ((configured === 'dws' || configured === '') && existsSync(saved)) this.config.dwsPath = saved
+        }
         // 恢复每个来源的滑动窗口；老存档没有这一段，就等新消息进来再重建。
         this.restoreWindows(payload.windows)
       }
@@ -2558,6 +2566,9 @@ export class DingTalkBridgeService {
       autoReplyAt: Number(this.state.autoReplyAt) || 0,
       minConfidence: this.config.minConfidence,
       windowMessages: this.config.windowMessages,
+      // 自动安装后 dwsPath 会指向 npm 全局包里的 vendor 可执行文件；记下来，
+      // 否则重启后 PATH 里没有 dws 又会退回「未安装」。
+      dwsPath: this.config.dwsPath,
       selfName: this.state.selfName,
       titles: Object.fromEntries([...this.titleCache.entries()].filter(([, value]) => value !== '')),
       messages: this.state.messages.slice(0, this.config.maxInbox),

@@ -1375,3 +1375,23 @@ test('dws 缺失时 checkTool 把安装状态标成 missing，并给出安装提
   assert.equal(snap.install.currentVersion, '')
   assert.equal(snap.tool.ok, false)
 })
+
+test('自动安装记下的 dws 路径会持久化，重启后不再退回「未安装」', async () => {
+  const home = await useFreshHome()
+  const fakeDws = join(home, 'vendor-dws.exe')
+  await writeFile(fakeDws, 'stub', 'utf8')
+
+  const first = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  first.config.dwsPath = fakeDws
+  await first.saveState()
+
+  const second = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  assert.equal(second.config.dwsPath, 'dws')
+  await second.loadState()
+  assert.equal(second.config.dwsPath, fakeDws)
+
+  // 用户显式配置了 dwsPath 时，存档不能覆盖它。
+  const third = new DingTalkBridgeService(makeCtx(), { dwsPath: 'dws-custom-path', autoSuggest: false, autoReply: false })
+  await third.loadState()
+  assert.equal(third.config.dwsPath, 'dws-custom-path')
+})
