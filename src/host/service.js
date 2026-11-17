@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.3.9-20261117T1615'
+export const HOST_BUILD = '0.4.0-20261117T1645'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -371,6 +371,8 @@ export class DingTalkBridgeService {
       selfName: '',
       currentProfile: '',
       profiles: [],
+      // 「还没登录钉钉」的提示。和 tool.ok 分开：没登录不是 dws 坏了。
+      loginNotice: '',
     }
 
     this.tool = { ok: false, version: '', error: '', checkedAt: 0 }
@@ -385,9 +387,14 @@ export class DingTalkBridgeService {
       source: '',
       log: '',
       latestError: '',
+      // 安装步骤（进度）：[{ key, label, status, detail, ms }]
+      steps: [],
+      startedAt: 0,
+      finishedAt: 0,
       checkedAt: 0,
     }
     this.installPromise = null
+    this.stepClock = new Map()
     this.login = { status: 'idle', code: '', url: '', qr: '', startedAt: 0, error: '', message: '' }
     this.loginChild = null
     this.listeners = new Map()
@@ -525,6 +532,41 @@ export class DingTalkBridgeService {
     return this.install
   }
 
+  /** 开始一次安装：把步骤清单重置为 pending，并记下开始时间（界面据此显示进度与耗时）。 */
+  beginInstallSteps(steps) {
+    this.stepClock = new Map()
+    this.setInstall({
+      steps: steps.map(([key, label]) => ({ key, label, status: 'pending', detail: '', ms: 0 })),
+      startedAt: Date.now(),
+      finishedAt: 0,
+    })
+  }
+
+  /** 更新某个安装步骤的状态；running / done / error 会记下该步骤耗时。 */
+  markStep(key, status, detail = '') {
+    const now = Date.now()
+    if (status === 'running' && !this.stepClock.has(key)) this.stepClock.set(key, now)
+    const startedAt = this.stepClock.get(key) ?? 0
+    const steps = (this.install.steps ?? []).map((step) => {
+      if (step.key !== key) return step
+      const next = { ...step, status }
+      if (detail !== '') next.detail = detail
+      if ((status === 'done' || status === 'error') && startedAt > 0) next.ms = now - startedAt
+      return next
+    })
+    this.setInstall({ steps })
+  }
+
+  /** 安装结束：没走到的步骤标成 skipped，失败的当前步标成 error，并记下结束时间。 */
+  finishInstallSteps(ok) {
+    const steps = (this.install.steps ?? []).map((step) => {
+      if (step.status === 'done' || step.status === 'error' || step.status === 'skipped') return step
+      if (step.status === 'running') return { ...step, status: ok ? 'done' : 'error' }
+      return { ...step, status: 'skipped' }
+    })
+    this.setInstall({ steps, finishedAt: Date.now() })
+  }
+
   /**
    * 查 npm 上 dingtalk-workspace-cli 的最新版本（只查不装）。
    * 换源时也走这里，所以界面上「检查更新」按钮可以随时点。
@@ -641,6 +683,11 @@ export class DingTalkBridgeService {
       return this.installFromTarball(target)
     }
 
+    this.beginInstallSteps([
+      ['npm', 'npm 全局安装'],
+      ['prepare', '准备 dws 可执行文件'],
+      ['verify', '校验 dws 版本'],
+    ])
     this.setInstall({
       status: 'installing',
       mode: 'npm',
@@ -650,10 +697,12 @@ export class DingTalkBridgeService {
     })
 
     const args = buildInstallArgs({ target, registry })
+    this.markStep('npm', 'running', 'npm 正在下载并写入全局目录…')
     const result = await runDws(npm, args, { timeoutMs: INSTALL_TIMEOUT })
     const output = `${result.stdout}\n${result.stderr}`.trim()
     if (result.code !== 0) {
       // npm 装失败（权限、网络、被拦的 postinstall…）同样退到免 npm 方式，别让用户卡住。
+      this.markStep('npm', 'error', `npm 退出码 ${result.code}`)
       this.setInstall({
         status: 'installing',
         mode: 'tarball',
@@ -661,22 +710,30 @@ export class DingTalkBridgeService {
       })
       return this.installFromTarball(target)
     }
+    this.markStep('npm', 'done', 'npm 安装完成')
 
     const root = await this.npmGlobalRoot(npm)
     const pkgDir = join(root || join(dirname(process.execPath), 'node_modules'), DWS_PACKAGE)
+    this.markStep('prepare', 'running', '正在执行包内 install.js（解压平台二进制）…')
     const postinstallLog = await this.preparePackage(pkgDir)
     const vendor = join(pkgDir, 'vendor', process.platform === 'win32' ? 'dws.exe' : 'dws')
     const installed = await runDws(vendor, ['--version'], { timeoutMs: 20_000 })
     if (installed.code === 0) this.config.dwsPath = vendor
+    this.markStep('prepare', 'done', postinstallLog.split('\n').filter(Boolean).at(-1) || '平台二进制已就绪')
 
+    this.markStep('verify', 'running', '正在校验 dws --version…')
     await this.checkTool()
     if (!this.tool.ok) {
+      this.markStep('verify', 'error', this.tool.error)
+      this.finishInstallSteps(false)
       this.setInstall({
         status: 'error',
         log: `${output.slice(-INSTALL_LOG_LIMIT)}\n\n${postinstallLog}\n\n安装完成但 dws 仍不可用：${this.tool.error}`.trim(),
       })
       return { ok: false, error: this.tool.error }
     }
+    this.markStep('verify', 'done', `dws v${this.tool.version}`)
+    this.finishInstallSteps(true)
 
     this.setInstall({
       status: 'ready',
@@ -718,7 +775,16 @@ export class DingTalkBridgeService {
     const registry = this.registry().replace(/\/+$/, '')
     const wanted = String(target ?? '').replace(/^v/, '').trim()
     const metaUrl = wanted === '' ? `${registry}/${DWS_PACKAGE}/latest` : `${registry}/${DWS_PACKAGE}/${wanted}`
+    this.beginInstallSteps([
+      ['resolve', '读取版本信息'],
+      ['download', '下载安装包'],
+      ['extract', '解压安装包'],
+      ['prepare', '准备 dws 可执行文件'],
+      ['verify', '校验 dws 版本'],
+    ])
+    this.setInstall({ status: 'installing', mode: 'tarball', source: registry, targetVersion: wanted })
     try {
+      this.markStep('resolve', 'running', '正在查询 npm 上的版本信息…')
       const metaResponse = await fetch(metaUrl, {
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(20_000),
@@ -728,23 +794,35 @@ export class DingTalkBridgeService {
       const url = tarballUrl(meta, DWS_PACKAGE)
       const version = String(meta?.version ?? wanted ?? '')
       if (url === '') throw new Error('版本信息里没有安装包地址')
+      this.markStep('resolve', 'done', `v${version}`)
 
-      const response = await fetch(url, { signal: AbortSignal.timeout(180_000) })
-      if (!response.ok) throw new Error(`下载安装包失败（HTTP ${response.status}）`)
-      const buffer = Buffer.from(await response.arrayBuffer())
+      const buffer = await this.fetchTarball(url, version)
 
+      this.markStep('extract', 'running', '正在解压…')
       const pkgDir = this.runtimePackageDir()
       await rm(pkgDir, { recursive: true, force: true })
       await mkdir(pkgDir, { recursive: true })
-      const files = await extractTarGz(buffer, pkgDir)
+      let lastReport = 0
+      const files = await extractTarGz(buffer, pkgDir, (count) => {
+        const now = Date.now()
+        if (now - lastReport < 300) return
+        lastReport = now
+        this.markStep('extract', 'running', `已解压 ${count} 个文件`)
+      })
+      this.markStep('extract', 'done', `${files.length} 个文件`)
 
+      this.markStep('prepare', 'running', '正在执行 install.js（解压平台二进制）…')
       const postinstallLog = await this.preparePackage(pkgDir)
       const vendor = join(pkgDir, 'vendor', process.platform === 'win32' ? 'dws.exe' : 'dws')
       const probe = await runDws(vendor, ['--version'], { timeoutMs: 20_000 })
       if (probe.code === 0) this.config.dwsPath = vendor
+      this.markStep('prepare', 'done', '平台二进制已就绪')
 
+      this.markStep('verify', 'running', '正在校验 dws --version…')
       await this.checkTool()
       if (!this.tool.ok) {
+        this.markStep('verify', 'error', this.tool.error)
+        this.finishInstallSteps(false)
         this.setInstall({
           status: 'error',
           mode: 'tarball',
@@ -752,6 +830,8 @@ export class DingTalkBridgeService {
         })
         return { ok: false, error: this.tool.error }
       }
+      this.markStep('verify', 'done', `dws v${this.tool.version}`)
+      this.finishInstallSteps(true)
 
       this.setInstall({
         status: 'ready',
@@ -766,6 +846,7 @@ export class DingTalkBridgeService {
       return { ok: true, version: this.tool.version, mode: 'tarball' }
     } catch (error) {
       const message = String(error?.message || error)
+      this.finishInstallSteps(false)
       this.setInstall({
         status: 'error',
         mode: 'tarball',
@@ -773,6 +854,60 @@ export class DingTalkBridgeService {
       })
       return { ok: false, error: message }
     }
+  }
+
+  /** 下载 tarball：优先用本地缓存（<dataDir>/dws-cache），否则带进度下载后写入缓存。 */
+  async fetchTarball(url, version) {
+    const cacheDir = join(this.dataDir(), 'dws-cache')
+    const cachePath = join(cacheDir, `${DWS_PACKAGE}-${version || 'latest'}.tgz`)
+    try {
+      const cached = await readFile(cachePath)
+      if (cached.length > 1024) {
+        this.markStep('download', 'done', `使用本地缓存（${(cached.length / 1048576).toFixed(1)} MB）`)
+        return cached
+      }
+    } catch {
+      // 没有缓存就正常下载。
+    }
+
+    this.markStep('download', 'running', '正在连接 npm 源…')
+    const response = await fetch(url, { signal: AbortSignal.timeout(180_000) })
+    if (!response.ok) throw new Error(`下载安装包失败（HTTP ${response.status}）`)
+    const total = Number(response.headers.get('content-length') ?? 0)
+    const chunks = []
+    let received = 0
+    let lastReport = 0
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        chunks.push(Buffer.from(value))
+        received += value.length
+        const now = Date.now()
+        if (now - lastReport > 300) {
+          lastReport = now
+          const mb = (received / 1048576).toFixed(1)
+          const percent = total > 0 ? ` · ${Math.round((received / total) * 100)}%` : ''
+          this.markStep('download', 'running', `已下载 ${mb} MB${percent}`)
+        }
+      }
+    } else {
+      const whole = Buffer.from(await response.arrayBuffer())
+      chunks.push(whole)
+      received = whole.length
+    }
+    const buffer = Buffer.concat(chunks)
+    if (buffer.length === 0) throw new Error('下载到的安装包是空的')
+    this.markStep('download', 'done', `${(buffer.length / 1048576).toFixed(1)} MB`)
+    try {
+      await mkdir(cacheDir, { recursive: true })
+      await writeFile(cachePath, buffer)
+    } catch {
+      // 缓存写不进去不影响安装。
+    }
+    return buffer
   }
 
   /** 「更新 dws」：先查最新版，再按版本号安装。 */
@@ -835,15 +970,17 @@ export class DingTalkBridgeService {
     this.state.selfName = current?.userName || this.state.selfName || ''
 
     if (profiles.length === 0) {
-      this.tool = {
-        ok: false,
-        version: this.tool.version,
-        error: result.code === 0 ? '未找到已登录的钉钉组织，请点击右上角「钉钉授权」登录' : describeFailure(result),
-        checkedAt: Date.now(),
+      // 注意：这里**不能**把 tool.ok 置 false。tool.ok 只表示「dws 二进制能不能用」，
+      // 「还没登录钉钉」是另一种状态——否则 startLogin() 的前置检查会认为 dws 不可用，
+      // 用户就永远点不动「钉钉授权」（新机器上首次授权必然如此）。
+      this.state.loginNotice =
+        result.code === 0 ? '未找到已登录的钉钉组织，请点击右上角「钉钉授权」登录' : describeFailure(result)
+    } else {
+      this.state.loginNotice = ''
+      if (!this.tool.ok) {
+        // 重新授权成功后要把「dws 未就绪」的旧结论翻回来，否则面板一直显示错误态。
+        this.tool = { ok: true, version: this.tool.version, error: '', checkedAt: Date.now() }
       }
-    } else if (!this.tool.ok) {
-      // 重新授权成功后要把「dws 未就绪」的旧结论翻回来，否则面板一直显示错误态。
-      this.tool = { ok: true, version: this.tool.version, error: '', checkedAt: Date.now() }
     }
 
     return profiles
@@ -2547,6 +2684,7 @@ export class DingTalkBridgeService {
         status: item.status,
       })),
       loginReset: this.config.loginReset,
+      loginNotice: String(this.state.loginNotice ?? ''),
       autoReply: this.state.autoReply,
       autoReplyAt: Number(this.state.autoReplyAt) || 0,
       autoSuggest: this.config.autoSuggest,

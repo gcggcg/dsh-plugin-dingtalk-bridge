@@ -1483,3 +1483,61 @@ test('dws 不可用时点授权会先提示安装 dws，而不是直接报命令
   assert.equal(service.snapshot().login.status, 'failed')
   assert.match(service.snapshot().login.message, /安装 dws/)
 })
+
+test('没登录钉钉时授权入口不会被「dws 未就绪」挡住', async () => {
+  await useFreshHome()
+  // dws 二进制可用（tool.ok=true），但还没有任何登录组织——新机器首次使用的正常状态。
+  const service = new DingTalkBridgeService(makeCtx(), {
+    autoSuggest: false,
+    autoReply: false,
+    dwsPath: 'dws-not-installed-for-test',
+  })
+  service.tool = { ok: true, version: '1.0.68', error: '', checkedAt: Date.now() }
+  service.state.profiles = []
+  service.state.loginNotice = '未找到已登录的钉钉组织，请点击右上角「钉钉授权」登录'
+
+  const snapshot = service.snapshot()
+  assert.equal(snapshot.tool.ok, true, '「没登录」不应该把 dws 标成不可用')
+  assert.match(String(snapshot.loginNotice), /钉钉授权/)
+
+  const started = await service.startLogin()
+  assert.notEqual(started.error, 'dws not ready', '旧实现会在这里永久卡住用户')
+  assert.ok(['pending', 'failed'].includes(service.login.status))
+  await service.cancelLogin()
+  assert.equal(service.login.status, 'idle')
+})
+
+test('安装步骤记录状态与耗时，结束时把没走到的步骤标成 skipped', () => {
+  const service = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  service.beginInstallSteps([
+    ['resolve', '读取版本信息'],
+    ['download', '下载安装包'],
+    ['extract', '解压安装包'],
+  ])
+  assert.equal(service.install.steps.length, 3)
+  assert.equal(service.install.steps[0].status, 'pending')
+  assert.ok(service.install.startedAt > 0)
+
+  service.markStep('resolve', 'running', 'v1.0.68')
+  service.markStep('resolve', 'done', 'v1.0.68')
+  service.markStep('download', 'running', '已下载 1.2 MB')
+  const steps = service.install.steps
+  assert.equal(steps[0].status, 'done')
+  assert.equal(steps[0].detail, 'v1.0.68')
+  assert.equal(steps[1].status, 'running')
+  assert.equal(steps[1].detail, '已下载 1.2 MB')
+  assert.equal(steps[2].status, 'pending')
+
+  service.finishInstallSteps(false)
+  assert.equal(service.install.steps[1].status, 'error')
+  assert.equal(service.install.steps[2].status, 'skipped')
+  assert.ok(service.install.finishedAt > 0)
+})
+
+test('extractTarGz 支持解压进度回调', async () => {
+  const dir = await mkdtemp(join(home, 'tar-progress-'))
+  const seen = []
+  const files = await extractTarGz(makeTarball([['package/a.txt', 'aaa']]), dir, (count) => seen.push(count))
+  assert.equal(files.length, 1)
+  assert.deepEqual(seen, [], '文件数不足 50 时不回调，避免刷屏')
+})

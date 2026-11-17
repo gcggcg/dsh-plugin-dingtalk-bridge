@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.3.9'
+    const CLIENT_BUILD = '0.4.0'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -171,6 +171,13 @@ window.__ModuleLoader__.load({
 .dsh-dt-install-log summary{cursor:pointer;color:${C.brand}}
 .dsh-dt-install-log pre{margin:6px 0 0;padding:8px 10px;border-radius:8px;background:${C.layer2};
   border:1px solid ${C.border1};font-size:11.5px;line-height:1.5;max-height:180px;overflow:auto;white-space:pre-wrap}
+.dsh-dt-steps{margin-top:8px;display:flex;flex-direction:column;gap:3px;font-size:12px;line-height:1.55}
+.dsh-dt-step{display:flex;align-items:baseline;gap:7px;min-width:0}
+.dsh-dt-stepmark{width:12px;flex:none;text-align:center;font-weight:600}
+.dsh-dt-step[data-step="running"] .dsh-dt-stepmark{animation:dsh-dt-pulse 1.1s ease-in-out infinite}
+.dsh-dt-steplabel{flex:none}
+.dsh-dt-stepdetail{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8}
+.dsh-dt-stepms{flex:none;opacity:.6;font-variant-numeric:tabular-nums}
 .dsh-dt-listbox{margin:0 20px 16px;border:1px solid ${C.border1};border-radius:14px;background:${C.layer1};
   box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;
   height:calc(100vh - 330px);min-height:340px;max-height:900px;overflow:hidden}
@@ -1148,7 +1155,20 @@ window.__ModuleLoader__.load({
       const expiredNote = expired > 0 ? ` · ${expired} 个组织登录已过期，建议重新授权` : ''
       if (!state || !state.enabled) return { dot: 'error', text: '插件已禁用', detail: '在设置 → 插件中启用后可用' }
       if (!state.tool || !state.tool.ok) {
-        return { dot: 'error', text: 'dws 未就绪', detail: state.tool && state.tool.error ? state.tool.error : '请检查 dws 是否已安装并登录' }
+        return {
+          dot: 'error',
+          text: 'dws 未就绪',
+          detail: state.tool && state.tool.error ? state.tool.error : '请先在下方提示卡里点「安装 dws」',
+        }
+      }
+      const profileCount = Array.isArray(state.profiles) ? state.profiles.length : 0
+      if (profileCount === 0) {
+        // dws 能用但还没登录钉钉：这不是故障，引导去授权，别显示成「dws 未就绪」。
+        return {
+          dot: 'connecting',
+          text: '未登录钉钉',
+          detail: state.loginNotice || '点右上角「钉钉授权」，扫码或登录后即可开始接收私信与群 @',
+        }
       }
       if (online.length > 0) {
         return {
@@ -1323,16 +1343,29 @@ window.__ModuleLoader__.load({
       const latest = String(install.latestVersion || '')
       const updateAvailable = Boolean(status === 'ready' && latest && current && latest !== current)
       const ready = Boolean(tool.ok)
-      if (ready && !updateAvailable) return null
+      const steps = Array.isArray(install.steps) ? install.steps : []
+      const running = steps.some((step) => step.status === 'running')
+      const startedAt = Number(install.startedAt) || 0
+      // 安装中每秒刷新一次「已用时」，用户能直观看到还在动。
+      const [, tickNow] = useState(Date.now())
+      useEffect(() => {
+        if (!running) return undefined
+        const timer = setInterval(() => tickNow(Date.now()), 1000)
+        return () => clearInterval(timer)
+      }, [running])
+      if (ready && !updateAvailable && steps.length === 0) return null
 
       const source = String(install.source || '配置的 npm 源')
       const busy = props.busy || ''
       const installing = status === 'installing' || busy === 'install-dws' || busy === 'update-dws'
       const failed = status === 'error'
       const tone = failed ? C.error : installing ? C.brand : C.warn
+      const elapsed = startedAt > 0 ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0
+      const currentStep = steps.find((step) => step.status === 'running')
+      const doneCount = steps.filter((step) => step.status === 'done').length
 
       const headline = installing
-        ? `正在安装 dws${install.targetVersion ? ` v${install.targetVersion}` : ''}…`
+        ? `正在安装 dws${install.targetVersion ? ` v${install.targetVersion}` : ''}${currentStep ? ` · ${currentStep.label}` : ''}`
         : failed
           ? 'dws 安装 / 更新失败'
           : ready
@@ -1340,12 +1373,48 @@ window.__ModuleLoader__.load({
             : '未检测到 dws 命令'
 
       const body = installing
-        ? '安装过程通常需要 10~60 秒，完成后会自动重新检测并开始接收消息。'
+        ? `第 ${Math.min(doneCount + 1, steps.length || 1)}/${steps.length || 1} 步${currentStep && currentStep.detail ? ` · ${currentStep.detail}` : ''} · 已用时 ${elapsed}s。装完会自动重新检测并开始接收消息。`
         : failed
           ? String(install.log || tool.error || '安装失败，请查看下面的日志。').slice(0, 600)
           : ready
             ? `更新后会重启监听，登录状态不受影响。安装来源：${source}`
             : `这个插件通过 dws CLI 收发钉钉消息。点「安装 dws」会自动安装 dingtalk-workspace-cli（来源：${source}）：有 npm 时走全局安装，没有 npm 时直接下载安装包解压到插件数据目录，全程无需你手动配置。`
+
+      const stepIcon = (stepStatus) =>
+        stepStatus === 'done' ? '✓' : stepStatus === 'running' ? '◐' : stepStatus === 'error' ? '✗' : stepStatus === 'skipped' ? '–' : '○'
+
+      const stepList =
+        steps.length === 0
+          ? null
+          : h(
+              'div',
+              { className: 'dsh-dt-steps' },
+              steps.map((step) =>
+                h(
+                  'div',
+                  {
+                    key: step.key,
+                    className: 'dsh-dt-step',
+                    'data-step': step.status,
+                    style: {
+                      color:
+                        step.status === 'error'
+                          ? C.error
+                          : step.status === 'running'
+                            ? C.brand
+                            : step.status === 'done'
+                              ? C.text
+                              : C.sub,
+                      opacity: step.status === 'pending' || step.status === 'skipped' ? 0.6 : 1,
+                    },
+                  },
+                  h('span', { className: 'dsh-dt-stepmark' }, stepIcon(step.status)),
+                  h('span', { className: 'dsh-dt-steplabel' }, step.label),
+                  step.detail ? h('span', { className: 'dsh-dt-stepdetail' }, step.detail) : null,
+                  step.ms > 0 ? h('span', { className: 'dsh-dt-stepms' }, `${(step.ms / 1000).toFixed(1)}s`) : null,
+                ),
+              ),
+            )
 
       return h(
         'div',
@@ -1356,6 +1425,7 @@ window.__ModuleLoader__.load({
           { style: { minWidth: 0, flex: 1 } },
           h('div', { className: 'dsh-dt-install-title' }, headline),
           h('div', { className: 'dsh-dt-install-body' }, body),
+          stepList,
           failed && install.log && install.log.length > 600
             ? h('details', { className: 'dsh-dt-install-log' }, h('summary', null, '查看完整日志'), h('pre', null, install.log))
             : null,

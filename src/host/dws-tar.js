@@ -49,13 +49,14 @@ function safeRelativePath(raw) {
  * npm 包里的顶层目录通常是 `package/`，这里会把 `package/` 前缀剥掉，
  * 让调用方拿到 `<destDir>/package.json`、`<destDir>/install.js` 这样的结构。
  */
-export async function extractTarGz(buffer, destDir) {
+export async function extractTarGz(buffer, destDir, onProgress) {
   const tar = gunzipSync(buffer)
   let offset = 0
   let pendingPath = ''
   let pendingLink = ''
   let longName = ''
   const written = []
+  const report = typeof onProgress === 'function' ? onProgress : null
 
   while (offset + BLOCK <= tar.length) {
     const header = tar.subarray(offset, offset + BLOCK)
@@ -106,6 +107,7 @@ export async function extractTarGz(buffer, destDir) {
     const mode = readOctal(header, 100, 8)
     await writeFile(target, data, { mode: mode > 0 ? mode : 0o644 })
     written.push(withoutPackage)
+    if (report && written.length % 50 === 0) report(written.length)
   }
 
   return written

@@ -27,6 +27,8 @@
 - **彩色插件图标**：侧边栏与面板标题使用 3D 机器人图标，宿主提供 `GET /icon` 路由，加载失败时回退单色 SVG。
 - **授权与去重**：默认 `loginMode=loopback`（浏览器授权，**不需要授权码**）；`loginReset=true` 时重新授权会先 `dws auth logout --yes` 退出旧组织，只保留本次登录的组织；也支持手动「退出」。
 - **dws 自动检测 / 安装 / 更新**：插件启动时只做检测，不会偷偷装东西。如果这台机器没有 `dws`，面板顶部会出现一条提示，点 **安装 dws** 即自动安装：有 npm 时执行 `npm install -g dingtalk-workspace-cli`（含 npm 12 会拦掉的 `install.js` 准备步骤），**没有 npm 时直接下载 npm 包 tarball 解压到插件数据目录**（自带纯 Node 解压器，不依赖系统 tar），两条路径都会自动定位 `vendor/dws.exe`。已装的话点 **检查更新** 能看到最新版本，再点 **更新到 vX** 升级。收件箱提示卡与设置页按钮都能触发，npm 源可用 `dwsRegistry` 换成国内镜像。
+- **安装进度可见**：安装时卡片会显示 **五步清单**（读取版本信息 → 下载安装包 → 解压 → 准备可执行文件 → 校验版本），每步带 ✓/◐/○ 与耗时，下载实时显示 MB 与百分比，标题还带「已用时 Ns」；同一版本重复安装直接命中 `dws-cache` 缓存。
+- **「没登录」不等于「dws 坏了」**：dws 可用但还没登录时，面板显示黄点「未登录钉钉 · 点右上角「钉钉授权」」，授权入口照常可用（0.4.0 修掉了旧版 `dws not ready` 死循环）。
 - **演练模式**：`dryRun=true` 时只预览将发送的内容（`dws --dry-run`），不真正发到钉钉，适合先试跑。
 - **持久化与自愈**：状态存在 `<DSH_HOME>/integrations/dingtalk-bridge/state.json`（tmp + rename 原子写，mode 0600），图片在 `.../media/`；早于 2020 年或超前一天的时间戳重置为当前时间，旧版 `confirmation_required` 失败记录自动清掉。
 
@@ -78,7 +80,7 @@ DSH → 插件市场（Open Plugin Market）→ 搜索 `dsh-plugin-dingtalk-brid
 **方式三 · 手动装 npm 包**
 
 ```bash
-npm i -g dsh-plugin-dingtalk-bridge@0.3.9   # 或装到 profile 的 dependencies 里
+npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies 里
 ```
 
 然后在 DSH profile 的 `package.json` 的 `dsh.profile.bundles` 里加入 `"dsh-plugin-dingtalk-bridge"`，执行 `pnpm install`，重启 DSH。
