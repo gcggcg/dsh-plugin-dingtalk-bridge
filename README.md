@@ -39,6 +39,10 @@
 | --- | --- |
 | ![确认弹框](docs/images/confirm-modal.png) | ![授权](docs/images/auth-loopback.png) |
 
+| Star / Issue 入口（右上角） |
+| --- |
+| ![Star 与 Issue 入口](docs/images/star-issue.png) |
+
 来源条展开、群 @ 回复气泡、连续多条编号、上下文窗口下拉框：
 
 ![来源条展开](docs/images/sources-expanded.png)
