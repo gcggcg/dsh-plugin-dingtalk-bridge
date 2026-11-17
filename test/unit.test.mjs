@@ -1,12 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { gzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { DingTalkBridgeService, buildSendArgs, composeReplyBody, detectMessageKind, extractEventText, extractImageRefs, buildInstallArgs, isDuplicateSendFailure, looksLikeMissingCommand, sniffImageMediaType, stripImageMarkers, planReplyParts } from '../src/host/service.js'
 import { buildSuggestPrompt, buildStreamOptions, cleanReply, parseSuggestion } from '../src/host/suggest.js'
 import { createLineReader, describeFailure, parseLooseJson } from '../src/host/dws.js'
+import { extractTarGz, tarballUrl } from '../src/host/dws-tar.js'
 
 const home = await mkdtemp(join(tmpdir(), 'dingtalk-bridge-test-'))
 process.env.DSH_HOME = home
@@ -914,6 +917,9 @@ test('logoutAll 会清空组织缓存并停止监听', async () => {
 test('已知登录态时 startLogin 会先退出旧组织再申请授权', async () => {
   await useFreshHome()
   const service = new DingTalkBridgeService(makeCtx(), { dwsPath: FAKE_DWS })
+  // 这个用例只验证「重新授权前先退出旧组织」，所以假装 dws 可用，
+  // 否则会先被「dws 未就绪，请先安装」的护栏挡住。
+  service.tool = { ok: true, version: '1.0.0', error: '' }
   service.state.profiles = [{ profile: 'corp-a:user', corpName: 'A', userId: 'user', userName: '甲', status: 'active' }]
   service.state.currentProfile = 'corp-a:user'
   assert.equal(service.hasLogin(), true)
@@ -1394,4 +1400,86 @@ test('自动安装记下的 dws 路径会持久化，重启后不再退回「未
   const third = new DingTalkBridgeService(makeCtx(), { dwsPath: 'dws-custom-path', autoSuggest: false, autoReply: false })
   await third.loadState()
   assert.equal(third.config.dwsPath, 'dws-custom-path')
+})
+
+// ---- 免 npm 安装链路 ----
+
+function makeTarEntry(name, content, mode = 0o644) {
+  const body = Buffer.from(content, 'utf8')
+  const header = Buffer.alloc(512)
+  header.write(name, 0, 100, 'utf8')
+  header.write(`${mode.toString(8).padStart(7, '0')}\0`, 100, 8, 'utf8')
+  header.write('0000000\0', 108, 8, 'utf8')
+  header.write('0000000\0', 116, 8, 'utf8')
+  header.write(`${body.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'utf8')
+  header.write(`${Math.floor(Date.now() / 1000).toString(8).padStart(11, '0')}\0`, 136, 12, 'utf8')
+  header.write('        ', 148, 8, 'utf8')
+  header.write('0', 156, 1, 'utf8')
+  header.write('ustar\0', 257, 6, 'utf8')
+  header.write('00', 263, 2, 'utf8')
+  let sum = 0
+  for (const byte of header) sum += byte
+  header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'utf8')
+  const padding = Buffer.alloc((512 - (body.length % 512)) % 512)
+  return Buffer.concat([header, body, padding])
+}
+
+function makeTarball(entries) {
+  const blocks = entries.map(([name, content, mode]) => makeTarEntry(name, content, mode))
+  const end = Buffer.alloc(1024)
+  return gzipSync(Buffer.concat([...blocks, end]))
+}
+
+test('tarballUrl 优先用元数据里的地址，缺失时按包名拼', () => {
+  assert.equal(
+    tarballUrl({ version: '1.0.68', dist: { tarball: 'https://example.com/x.tgz' } }),
+    'https://example.com/x.tgz',
+  )
+  assert.equal(
+    tarballUrl({ version: '1.0.68' }),
+    'https://registry.npmjs.org/dingtalk-workspace-cli/-/dingtalk-workspace-cli-1.0.68.tgz',
+  )
+})
+
+test('extractTarGz 解出文件并剥掉 npm 的 package/ 前缀', async () => {
+  const dir = await mkdtemp(join(home, 'tar-'))
+  const buffer = makeTarball([
+    ['package/package.json', '{"name":"demo"}'],
+    ['package/bin/run.js', 'console.log(1)', 0o755],
+  ])
+  const files = await extractTarGz(buffer, dir)
+  assert.equal(files.length, 2)
+  const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+  assert.equal(pkg.name, 'demo')
+  assert.ok(existsSync(join(dir, 'bin', 'run.js')))
+})
+
+test('extractTarGz 拒绝跳出目标目录的路径', async () => {
+  const dir = await mkdtemp(join(home, 'tar-'))
+  const buffer = makeTarball([['package/../evil.txt', 'x']])
+  await assert.rejects(() => extractTarGz(buffer, dir), /路径/)
+  assert.equal(existsSync(join(dirname(dir), 'evil.txt')), false)
+})
+
+test('findNode 能找到可执行的 node，安装目录落在插件数据目录下', async () => {
+  await useFreshHome()
+  const service = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  const node = await service.findNode()
+  assert.notEqual(node, '')
+  const dir = service.runtimePackageDir()
+  assert.ok(dir.endsWith(join('dws-runtime', 'node_modules', 'dingtalk-workspace-cli')))
+})
+
+test('dws 不可用时点授权会先提示安装 dws，而不是直接报命令不存在', async () => {
+  await useFreshHome()
+  const service = new DingTalkBridgeService(makeCtx(), {
+    autoSuggest: false,
+    autoReply: false,
+    dwsPath: 'dws-not-installed-for-test',
+  })
+  await service.checkTool()
+  const result = await service.startLogin()
+  assert.equal(result.ok, false)
+  assert.equal(service.snapshot().login.status, 'failed')
+  assert.match(service.snapshot().login.message, /安装 dws/)
 })

@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.3.7'
+    const CLIENT_BUILD = '0.3.8'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -1345,7 +1345,7 @@ window.__ModuleLoader__.load({
           ? String(install.log || tool.error || '安装失败，请查看下面的日志。').slice(0, 600)
           : ready
             ? `更新后会重启监听，登录状态不受影响。安装来源：${source}`
-            : `这个插件通过 dws CLI 收发钉钉消息。点「安装 dws」会自动执行 npm install -g dingtalk-workspace-cli（来源：${source}），需要本机已安装 Node.js。`
+            : `这个插件通过 dws CLI 收发钉钉消息。点「安装 dws」会自动安装 dingtalk-workspace-cli（来源：${source}）：有 npm 时走全局安装，没有 npm 时直接下载安装包解压到插件数据目录，全程无需你手动配置。`
 
       return h(
         'div',
@@ -2388,6 +2388,11 @@ window.__ModuleLoader__.load({
 
     function SettingsCard() {
       const { state, error } = useBridge()
+      const [installBusy, setInstallBusy] = useState('')
+      const install = (state && state.install) || null
+      const installStatus = (install && install.status) || 'unknown'
+      const installUpdate = install && install.updateAvailable ? install.latestVersion : ''
+      const dwsReady = Boolean(state && state.tool && state.tool.ok)
       const summary = listenerSummary(state)
       const model = (state && state.model) || null
       const modelText =
@@ -2471,10 +2476,18 @@ window.__ModuleLoader__.load({
               : state.install.status === 'installing'
                 ? `安装中（${state.install.targetVersion ? `v${state.install.targetVersion}，` : ''}${state.install.source || '...'}）`
                 : state.install.status === 'missing'
-                  ? '未安装（可点上方「安装 dws」自动安装）'
+                  ? '未安装（可点上方「安装 dws」自动安装，没有 npm 也能装）'
                   : state.install.status === 'error'
                     ? '安装 / 更新失败（可查看日志后重试）'
                     : '检测中'
+            : '—',
+        ],
+        [
+          '安装方式',
+          state && state.install && state.install.mode
+            ? state.install.mode === 'tarball'
+              ? '免 npm（直接下载安装包解压）'
+              : 'npm 全局安装'
             : '—',
         ],
         [
@@ -2537,6 +2550,51 @@ window.__ModuleLoader__.load({
           state && Array.isArray(state.profiles) && state.profiles.length > 0
             ? h(Button, { size: 'sm', onClick: () => postAction({ type: 'logout' }) }, '退出钉钉登录')
             : null,
+          dwsReady
+            ? null
+            : h(
+                Button,
+                {
+                  size: 'sm',
+                  variant: 'primary',
+                  disabled: installBusy === 'install-dws' || installStatus === 'installing',
+                  onClick: () => {
+                    setInstallBusy('install-dws')
+                    Promise.resolve(postAction({ type: 'install-dws' })).finally(() => setInstallBusy(''))
+                  },
+                  title: '自动安装 dws（优先用 npm；没有 npm 时直接下载安装包解压）',
+                },
+                installStatus === 'installing' ? '安装中…' : '安装 dws',
+              ),
+          installUpdate
+            ? h(
+                Button,
+                {
+                  size: 'sm',
+                  variant: 'primary',
+                  disabled: installBusy === 'update-dws' || installStatus === 'installing',
+                  onClick: () => {
+                    setInstallBusy('update-dws')
+                    Promise.resolve(postAction({ type: 'update-dws' })).finally(() => setInstallBusy(''))
+                  },
+                  title: `更新到 v${installUpdate}`,
+                },
+                installBusy === 'update-dws' ? '更新中…' : `更新到 v${installUpdate}`,
+              )
+            : null,
+          h(
+            Button,
+            {
+              size: 'sm',
+              disabled: installBusy === 'check-dws-update' || installStatus === 'installing',
+              onClick: () => {
+                setInstallBusy('check-dws-update')
+                Promise.resolve(postAction({ type: 'check-dws-update' })).finally(() => setInstallBusy(''))
+              },
+              title: '查询 npm 源上的最新 dws 版本',
+            },
+            installBusy === 'check-dws-update' ? '检查中…' : '检查 dws 更新',
+          ),
           h(Button, { size: 'sm', onClick: () => postAction({ type: 'refresh' }) }, '刷新状态'),
           h(Button, { size: 'sm', onClick: () => postAction({ type: 'restart-listeners' }) }, '重启监听'),
         ),

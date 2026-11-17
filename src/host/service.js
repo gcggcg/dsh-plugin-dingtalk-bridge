@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir, unlink, appendFile } from 'node:fs/promises'
+import { readFile, writeFile, rename, mkdir, unlink, appendFile, readdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -15,12 +15,13 @@ import {
   createLineReader,
 } from './dws.js'
 import QRCode from 'qrcode'
+import { extractTarGz, tarballUrl } from './dws-tar.js'
 
 import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.js'
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.3.7-20261117T1445'
+export const HOST_BUILD = '0.3.8-20261117T1545'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -357,12 +358,9 @@ export class DingTalkBridgeService {
       loginReset: asBool(config.loginReset, true),
     }
 
-    this.statePath = join(
-      process.env.DSH_HOME && process.env.DSH_HOME.trim() !== '' ? process.env.DSH_HOME : join(homedir(), '.dsh'),
-      'integrations',
-      'dingtalk-bridge',
-      'state.json',
-    )
+    this.dshHomePath =
+      process.env.DSH_HOME && process.env.DSH_HOME.trim() !== '' ? process.env.DSH_HOME : join(homedir(), '.dsh')
+    this.statePath = join(this.dshHomePath, 'integrations', 'dingtalk-bridge', 'state.json')
 
     this.state = {
       autoReply: this.config.autoReply,
@@ -379,6 +377,7 @@ export class DingTalkBridgeService {
     // dws 的安装/更新状态：只有用户点「安装 dws」「更新 dws」才会真的执行 npm 命令。
     this.install = {
       status: 'unknown',
+      mode: '',
       currentVersion: '',
       latestVersion: '',
       updateAvailable: false,
@@ -554,7 +553,7 @@ export class DingTalkBridgeService {
     }
   }
 
-  /** 依次尝试 npm_execpath、node 同目录的 npm、PATH 里的 npm。 */
+  /** 依次尝试 npm_execpath、node 同目录的 npm、PATH 里的 npm、常见安装目录。 */
   async findNpm() {
     const candidates = []
     const execPath = String(process.env.npm_execpath ?? '').trim()
@@ -562,8 +561,13 @@ export class DingTalkBridgeService {
     const nodeDir = dirname(process.execPath)
     if (process.platform === 'win32') {
       candidates.push(join(nodeDir, 'npm.cmd'))
+      candidates.push(join(process.env.ProgramFiles ?? 'C:\\Program Files', 'nodejs', 'npm.cmd'))
+      candidates.push(join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'nodejs', 'npm.cmd'))
+      if (process.env.APPDATA) candidates.push(join(process.env.APPDATA, 'npm', 'npm.cmd'))
+      if (process.env.LOCALAPPDATA) candidates.push(join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'npm.cmd'))
     } else {
       candidates.push(join(nodeDir, 'bin', 'npm'), join(nodeDir, 'npm'))
+      candidates.push('/usr/local/bin/npm', '/opt/homebrew/bin/npm', '/usr/bin/npm')
     }
     candidates.push('npm')
     for (const candidate of candidates) {
@@ -574,6 +578,37 @@ export class DingTalkBridgeService {
     }
     return ''
   }
+
+  /** 找一个能跑 install.js 的 node：优先自己（node 启动时），其次 DSH 自带的 node，最后 PATH。 */
+  async findNode() {
+    const candidates = []
+    if (process.versions && process.versions.node && !process.versions.electron) candidates.push(process.execPath)
+    const runtimeRoot = join(this.dshHome(), 'dsh-runtimes')
+    try {
+      const entries = await readdir(runtimeRoot, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const base = join(runtimeRoot, entry.name, 'dependencies', 'node')
+        candidates.push(join(base, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'))
+        candidates.push(join(base, process.platform === 'win32' ? 'node.exe' : 'node'))
+      }
+    } catch {
+      // 没有 dsh-runtimes 目录就跳过。
+    }
+    if (process.versions && process.versions.node) candidates.push(process.execPath)
+    candidates.push('node')
+    for (const candidate of candidates) {
+      const probe = await runDws(candidate, ['--version'], { timeoutMs: 15_000 })
+      if (probe.code === 0 && /v?\d+\.\d+\.\d+/.test(`${probe.stdout}${probe.stderr}`)) return candidate
+    }
+    return ''
+  }
+
+  /** 不依赖 npm 的安装目录：<state 目录>/dws-runtime/node_modules/dingtalk-workspace-cli。 */
+  runtimePackageDir() {
+    return join(this.dataDir(), 'dws-runtime', 'node_modules', DWS_PACKAGE)
+  }
+
 
   /** `npm root -g`：全局 node_modules，用来找安装后的包目录。 */
   async npmGlobalRoot(npm) {
@@ -595,17 +630,20 @@ export class DingTalkBridgeService {
     const registry = this.registry()
     const npm = await this.findNpm()
     if (npm === '') {
+      // 没有 npm 也能装：直接下 tarball 解压，再用 node 跑包内 install.js。
       this.setInstall({
-        status: 'error',
+        status: 'installing',
+        mode: 'tarball',
         source: registry,
         targetVersion: target,
-        log: '没有找到 npm，无法自动安装 dws。请先安装 Node.js（自带 npm），或在配置项 dwsPath 里填一个已存在的 dws 路径。',
+        log: '没有找到 npm，改用免 npm 方式：直接从 npm 源下载安装包并解压。',
       })
-      return { ok: false, error: 'npm not found' }
+      return this.installFromTarball(target)
     }
 
     this.setInstall({
       status: 'installing',
+      mode: 'npm',
       source: registry,
       targetVersion: target,
       log: `正在执行：${npm} ${buildInstallArgs({ target, registry }).join(' ')}`,
@@ -615,33 +653,18 @@ export class DingTalkBridgeService {
     const result = await runDws(npm, args, { timeoutMs: INSTALL_TIMEOUT })
     const output = `${result.stdout}\n${result.stderr}`.trim()
     if (result.code !== 0) {
+      // npm 装失败（权限、网络、被拦的 postinstall…）同样退到免 npm 方式，别让用户卡住。
       this.setInstall({
-        status: 'error',
-        log: output.slice(-INSTALL_LOG_LIMIT) || describeFailure(result),
+        status: 'installing',
+        mode: 'tarball',
+        log: `npm 安装失败，改用免 npm 方式重试。\n\n${output.slice(-1200)}`,
       })
-      return { ok: false, error: describeFailure(result) }
+      return this.installFromTarball(target)
     }
 
     const root = await this.npmGlobalRoot(npm)
     const pkgDir = join(root || join(dirname(process.execPath), 'node_modules'), DWS_PACKAGE)
-    // npm 12 默认会拦掉依赖的 postinstall（钉钉包靠 install.js 准备可执行文件），
-    // 所以这里手动补跑一次 install.js，否则装完可能仍然找不到可用的 dws。
-    let postinstallLog = ''
-    const postinstall = join(pkgDir, 'install.js')
-    try {
-      await readFile(postinstall)
-      const prepared = await runDws(process.execPath, [postinstall], {
-        cwd: pkgDir,
-        timeoutMs: 180_000,
-        env: { ...process.env, DWS_NO_SKILLS: '1' },
-      })
-      postinstallLog = `${prepared.stdout}\n${prepared.stderr}`.trim().slice(-1200)
-      if (prepared.code !== 0) postinstallLog = `install.js 退出码 ${prepared.code}\n${postinstallLog}`
-    } catch {
-      // 没有 install.js 说明这个版本不需要准备步骤。
-    }
-
-    // 有的版本把真正的可执行文件放在 vendor/ 下，优先用它（避免 cmd 垫片再绕一层）。
+    const postinstallLog = await this.preparePackage(pkgDir)
     const vendor = join(pkgDir, 'vendor', process.platform === 'win32' ? 'dws.exe' : 'dws')
     const installed = await runDws(vendor, ['--version'], { timeoutMs: 20_000 })
     if (installed.code === 0) this.config.dwsPath = vendor
@@ -657,6 +680,7 @@ export class DingTalkBridgeService {
 
     this.setInstall({
       status: 'ready',
+      mode: 'npm',
       currentVersion: this.tool.version,
       latestVersion: target.replace(/^v/, '') || this.install.latestVersion,
       updateAvailable: false,
@@ -664,7 +688,91 @@ export class DingTalkBridgeService {
     })
     await this.refreshProfiles()
     this.startAllListeners()
-    return { ok: true, version: this.tool.version }
+    return { ok: true, version: this.tool.version, mode: 'npm' }
+  }
+
+  /**
+   * 跑包内 install.js：npm 12 会拦掉依赖的 postinstall，而 dws 靠这一步把
+   * 平台二进制解压到 vendor/。返回日志尾部，便于失败时展示。
+   */
+  async preparePackage(pkgDir) {
+    const postinstall = join(pkgDir, 'install.js')
+    try {
+      await readFile(postinstall)
+    } catch {
+      return ''
+    }
+    const node = await this.findNode()
+    if (node === '') return '没有找到可用的 node，无法执行 install.js'
+    const prepared = await runDws(node, [postinstall], {
+      cwd: pkgDir,
+      timeoutMs: 180_000,
+      env: { ...process.env, DWS_NO_SKILLS: '1' },
+    })
+    const log = `${prepared.stdout}\n${prepared.stderr}`.trim().slice(-1200)
+    return prepared.code === 0 ? log : `install.js 退出码 ${prepared.code}\n${log}`
+  }
+
+  /** 免 npm 安装：下载 npm 包 tarball → 解压到插件数据目录 → 跑 install.js → 定位 vendor 可执行文件。 */
+  async installFromTarball(target) {
+    const registry = this.registry().replace(/\/+$/, '')
+    const wanted = String(target ?? '').replace(/^v/, '').trim()
+    const metaUrl = wanted === '' ? `${registry}/${DWS_PACKAGE}/latest` : `${registry}/${DWS_PACKAGE}/${wanted}`
+    try {
+      const metaResponse = await fetch(metaUrl, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!metaResponse.ok) throw new Error(`获取版本信息失败（HTTP ${metaResponse.status}）`)
+      const meta = await metaResponse.json()
+      const url = tarballUrl(meta, DWS_PACKAGE)
+      const version = String(meta?.version ?? wanted ?? '')
+      if (url === '') throw new Error('版本信息里没有安装包地址')
+
+      const response = await fetch(url, { signal: AbortSignal.timeout(180_000) })
+      if (!response.ok) throw new Error(`下载安装包失败（HTTP ${response.status}）`)
+      const buffer = Buffer.from(await response.arrayBuffer())
+
+      const pkgDir = this.runtimePackageDir()
+      await rm(pkgDir, { recursive: true, force: true })
+      await mkdir(pkgDir, { recursive: true })
+      const files = await extractTarGz(buffer, pkgDir)
+
+      const postinstallLog = await this.preparePackage(pkgDir)
+      const vendor = join(pkgDir, 'vendor', process.platform === 'win32' ? 'dws.exe' : 'dws')
+      const probe = await runDws(vendor, ['--version'], { timeoutMs: 20_000 })
+      if (probe.code === 0) this.config.dwsPath = vendor
+
+      await this.checkTool()
+      if (!this.tool.ok) {
+        this.setInstall({
+          status: 'error',
+          mode: 'tarball',
+          log: `已解压 ${files.length} 个文件到 ${pkgDir}，但 dws 仍不可用：${this.tool.error}\n\n${postinstallLog}`.trim(),
+        })
+        return { ok: false, error: this.tool.error }
+      }
+
+      this.setInstall({
+        status: 'ready',
+        mode: 'tarball',
+        currentVersion: this.tool.version,
+        latestVersion: version || this.install.latestVersion,
+        updateAvailable: false,
+        log: `已安装 dws v${this.tool.version}（免 npm，来源：${registry}）`,
+      })
+      await this.refreshProfiles()
+      this.startAllListeners()
+      return { ok: true, version: this.tool.version, mode: 'tarball' }
+    } catch (error) {
+      const message = String(error?.message || error)
+      this.setInstall({
+        status: 'error',
+        mode: 'tarball',
+        log: `免 npm 安装失败：${message}。请检查网络能否访问 ${registry}，或手动安装 dws 后在配置项 dwsPath 里填绝对路径。`,
+      })
+      return { ok: false, error: message }
+    }
   }
 
   /** 「更新 dws」：先查最新版，再按版本号安装。 */
@@ -832,6 +940,23 @@ export class DingTalkBridgeService {
    */
   async startLogin() {
     if (this.loginChild) return { ok: true, login: this.login }
+
+    // dws 不可用时直接授权只会拿到一句「'dws' 不是内部或外部命令」，
+    // 所以先拦一下，把用户引到「安装 dws」上。
+    if (!this.tool.ok) {
+      this.login = {
+        ...this.login,
+        status: 'failed',
+        code: '',
+        url: '',
+        qr: '',
+        qrUrl: '',
+        error: this.tool.error || `未检测到 dws 命令（当前配置：${this.config.dwsPath}）`,
+        message: '还没有可用的 dws，所以无法发起钉钉授权。请先在上方「dws 未安装」提示卡里点「安装 dws」（没有 npm 也能装），装好后再点「钉钉授权」。',
+      }
+      this.broadcast()
+      return { ok: false, error: 'dws not ready' }
+    }
 
     // 默认先退出已登录的组织：否则每授权一次就多一个组织，监听列表越滚越长。
     if (this.config.loginReset && this.config.profiles.length === 0 && this.hasLogin()) {
@@ -1379,6 +1504,11 @@ export class DingTalkBridgeService {
    */
   dataDir() {
     return dirname(this.statePath)
+  }
+
+  /** DSH 的数据目录（dsh-runtimes 就在这里，用来找自带的 node）。 */
+  dshHome() {
+    return this.dshHomePath
   }
 
   mediaDir() {
