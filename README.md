@@ -54,11 +54,37 @@
 
 ## 前置要求
 
-- DSH `>= 0.2.1-rc.3 < 0.3.0-0`，Node `>= 22.19.0`。
-- 本机已安装并登录钉钉工作台 CLI：`dws --version` 能输出版本号（当前验证版本 `1.0.68`）。
+- DSH `>= 0.2.1-rc.3 < 0.3.0-0`，Node `>= 22.19.0`（DSH 自带的 Node 就够用）。
+- **不需要预装 dws**：插件会检测环境，没有 `dws` 时点「安装 dws」即可自动安装（有 npm 走全局安装，**没有 npm 也能装**——直接下载 npm 包解压，并借用 DSH 自带的 Node）。
 - 首次使用需要一次钉钉授权（面板右上角 **钉钉授权**）。
 
-## 安装（三步）
+## 安装（推荐：一句话 / 插件市场）
+
+插件已发布到 npm：`dsh-plugin-dingtalk-bridge`。装法从简到繁三种，任选一种：
+
+**方式一 · 让 DSH 自己装（推荐）**
+
+在 DSH 对话框里直接说：
+
+> 安装 npm 插件 `dsh-plugin-dingtalk-bridge`，装好后重启
+
+助手会调用 `plugin_manager` 以 npm 包名安装到当前 profile，完成后重启 DSH 即可。
+
+**方式二 · 插件市场**
+
+DSH → 插件市场（Open Plugin Market）→ 搜索 `dsh-plugin-dingtalk-bridge` 或「钉钉消息自动化」→ 安装 → 重启 DSH。
+（收录申请审核中，暂时搜不到就用方式一。）
+
+**方式三 · 手动装 npm 包**
+
+```bash
+npm i -g dsh-plugin-dingtalk-bridge@0.3.9   # 或装到 profile 的 dependencies 里
+```
+
+然后在 DSH profile 的 `package.json` 的 `dsh.profile.bundles` 里加入 `"dsh-plugin-dingtalk-bridge"`，执行 `pnpm install`，重启 DSH。
+
+<details>
+<summary>开发者：从源码目录安装（改代码即时生效）</summary>
 
 1. 把插件目录放进本机任意位置，例如 `E:/project/deepseek-tool/dsh-plugin-dingtalk`。
 2. 在 DSH profile 的 `package.json` 里加 **link 依赖**（不要用 `file:`，`file:` 会复制一份，改源码不生效）：
@@ -78,11 +104,16 @@
 
 3. 在该 profile 目录执行 `pnpm install --prefer-offline`，然后**重启 DSH**。
 
+> 注意：npm 版与源码 `link:` 版共用同一个 loader id（`dingtalk-bridge`），**不要同时装**。从源码版切到 npm 版时，先删掉 `link:` 依赖再装。
+
+</details>
+
 ## 验证是否装好
 
 - 侧边栏出现「钉钉消息」图标，点开后是「钉钉消息自动化」面板。
 - 设置 → 插件 → 钉钉消息自动化 能看到配置卡片；面板右上角点 **钉钉授权** 能弹出授权框。
-- 设置页 **宿主版本** 应与界面版本一致（当前 `0.3.2`）；不一致说明宿主代码没重载，重启 DSH。
+- 设置页 **宿主版本** 应与界面版本一致（当前 `0.3.9`）；不一致说明宿主代码没重载，重启 DSH。
+- 没装 dws 的机器会看到「未检测到 dws 命令」提示卡，点 **安装 dws** 即可。
 
 ## 配置项
 
