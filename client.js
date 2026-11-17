@@ -24,7 +24,24 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.3.2'
+    const CLIENT_BUILD = '0.3.3'
+    // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
+    const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
+    const ISSUES_URL = `${REPO_URL}/issues`
+    const NPM_URL = 'https://www.npmjs.com/package/dsh-plugin-dingtalk-bridge'
+
+    function openExternal(url) {
+      try {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } catch (error) {
+        // 浏览器拦截弹窗时退化为同页跳转
+        try {
+          window.location.href = url
+        } catch (ignored) {
+          /* 忽略：无 window 环境（测试） */
+        }
+      }
+    }
 
     // ------------------------------------------------------------------ 设计令牌
 
@@ -53,6 +70,11 @@ window.__ModuleLoader__.load({
 .dsh-dt-title{font-size:15px;font-weight:650;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
 .dsh-dt-sub{font-size:11.5px;color:${C.sub};display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
 .dsh-dt-spacer{flex:1}
+.dsh-dt-footnote{font-size:11.5px;color:${C.sub};opacity:.85;white-space:nowrap}
+.dsh-dt-links{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:12px;
+  border-top:1px dashed ${C.border1};font-size:12px;color:${C.sub}}
+.dsh-dt-links a{color:${C.brand};text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.dsh-dt-links a:hover{text-decoration:underline}
 .dsh-dt-toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;flex-wrap:wrap;
   border-bottom:1px solid ${C.border1};background:${C.bg}}
 .dsh-dt-tabs{display:flex;gap:2px;padding:2px;background:${C.layer2};border-radius:9px;border:1px solid ${C.border1}}
@@ -1081,6 +1103,22 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        h(
+          'div',
+          { className: 'dsh-dt-links' },
+          h(
+            'a',
+            { href: REPO_URL, target: '_blank', rel: 'noopener noreferrer', title: '在 GitHub 上给这个插件点个 Star' },
+            '★ Star',
+          ),
+          h(
+            'a',
+            { href: `${ISSUES_URL}/new`, target: '_blank', rel: 'noopener noreferrer', title: '反馈问题或提功能建议' },
+            '🐞 提交 Issue',
+          ),
+          h('a', { href: NPM_URL, target: '_blank', rel: 'noopener noreferrer', title: '在 npm 上查看版本与安装信息' }, 'npm'),
+          h('span', null, '欢迎点赞或反馈问题'),
+        ),
       )
     }
 
@@ -1515,6 +1553,27 @@ window.__ModuleLoader__.load({
             },
             helpOpen ? '返回收件箱' : '使用说明',
           ),
+          h(
+            Button,
+            {
+              size: 'sm',
+              variant: 'ghost',
+              onClick: () => openExternal(REPO_URL),
+              title: '在 GitHub 上查看源码、点个 Star 支持作者',
+            },
+            '★ Star',
+          ),
+          h(
+            Button,
+            {
+              size: 'sm',
+              variant: 'ghost',
+              onClick: () => openExternal(`${ISSUES_URL}/new`),
+              title: '提交 Issue：反馈问题或提功能建议',
+            },
+            '提交 Issue',
+          ),
+          h('span', { className: 'dsh-dt-footnote' }, '欢迎点赞或反馈问题'),
         ),
 
         helpOpen ? null : h(

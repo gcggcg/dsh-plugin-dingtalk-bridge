@@ -2,6 +2,8 @@
 
 只对接钉钉一个平台的 DSH 插件：**一键授权**（默认浏览器授权，不需要抄授权码）后实时接收**私信**与**群 @ 我**的消息，按发送人记录来源，用 AI 生成**建议回复**；开启自动回复后，达到可信度阈值就直接回复，不确定时在 DSH 主界面弹框请你确认。
 
+[GitHub 仓库](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge) · [★ Star](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge) · [🐞 提交 Issue](https://github.com/gcggcg/dsh-plugin-dingtalk-bridge/issues/new) · [npm](https://www.npmjs.com/package/dsh-plugin-dingtalk-bridge)
+
 ![收件箱面板](docs/images/inbox-panel.png)
 
 ## 功能特性
@@ -19,6 +21,7 @@
 - **群 @ 回复自动 @ 回对方**：群里的 @ 消息在回复时先在正文拼 `<@发送人openDingTalkId>` 并同时传 `--at-open-dingtalk-ids`，钉钉会渲染成真正的 @提及——谁 @ 我，我就 @ 谁；回复气泡上标出「@发送人」，私信不加 @。可用 `groupReplyAt` 关闭。
 - **连续多条回复**：对方说「给我发 10 条消息试试」时，模型会把回复拆成 2~5 条短消息依次发出（每条之间默认隔 600ms），气泡里按 1/2/3 编号列出；自己输入时用换行分隔也能拆成多条。上限与间隔可用 `multiSendMax` / `multiSendDelayMs` 调整，`multiSend` 关闭后永远只发一条。
 - **独立的「使用说明」视图**：点右上角 **使用说明**，整页只保留自动回复设置卡与说明卡，工具栏、来源条、消息列表全部隐藏，方便边看边调。
+- **Star / Issue 入口**：面板右上角「使用说明」旁边有 **★ Star** 与 **提交 Issue**，说明卡底部也有同样的链接与 npm 入口，方便反馈问题。
 - **彩色插件图标**：侧边栏与面板标题使用 3D 机器人图标，宿主提供 `GET /icon` 路由，加载失败时回退单色 SVG。
 - **授权与去重**：默认 `loginMode=loopback`（浏览器授权，**不需要授权码**）；`loginReset=true` 时重新授权会先 `dws auth logout --yes` 退出旧组织，只保留本次登录的组织；也支持手动「退出」。
 - **演练模式**：`dryRun=true` 时只预览将发送的内容（`dws --dry-run`），不真正发到钉钉，适合先试跑。
