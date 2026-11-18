@@ -80,7 +80,7 @@ DSH → 插件市场（Open Plugin Market）→ 搜索 `dsh-plugin-dingtalk-brid
 **方式三 · 手动装 npm 包**
 
 ```bash
-npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies 里
+npm i -g dsh-plugin-dingtalk-bridge@0.4.4   # 或装到 profile 的 dependencies 里
 ```
 
 然后在 DSH profile 的 `package.json` 的 `dsh.profile.bundles` 里加入 `"dsh-plugin-dingtalk-bridge"`，执行 `pnpm install`，重启 DSH。
