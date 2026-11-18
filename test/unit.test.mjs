@@ -901,6 +901,8 @@ test('logoutAll 会清空组织缓存并停止监听', async () => {
   service.state.profiles = [{ profile: 'corp-a:user', corpName: 'A', userId: 'user', userName: '甲', status: 'active' }]
   service.state.currentProfile = 'corp-a:user'
   service.state.selfName = '甲'
+  // dws 本身是好的，只是这次 logout 命令会失败（假命令）。
+  service.tool = { ok: true, version: '1.0.68', error: '', checkedAt: Date.now() }
 
   const result = await service.logoutAll()
   // 假命令必然失败，但本地状态一定要先清干净，界面才不会继续显示旧组织。
@@ -908,8 +910,9 @@ test('logoutAll 会清空组织缓存并停止监听', async () => {
   assert.deepEqual(service.state.profiles, [])
   assert.equal(service.state.currentProfile, '')
   assert.equal(service.state.selfName, '')
-  assert.equal(service.tool.ok, false)
-  assert.match(service.tool.error, /退出登录|重新登录|dws/i)
+  // 退出登录不是 dws 故障：tool.ok 必须保持不变，否则界面会误报「未检测到 dws 命令」。
+  assert.equal(service.tool.ok, true)
+  assert.match(service.snapshot().loginNotice, /退出登录/)
   assert.equal(service.snapshot().profiles.length, 0)
   assert.equal(service.snapshot().loginReset, true)
 })
@@ -1577,4 +1580,30 @@ test('dws 装在插件数据目录时，即使 dwsPath 丢了也能自己找回�
   const again = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
   await again.loadState()
   assert.equal(again.config.dwsPath, stub)
+})
+
+test('退出登录只清登录态，不会把 dws 说成未安装', { skip: process.platform !== 'win32' }, async () => {
+  const home = await useFreshHome()
+  const stub = join(home, 'fake-dws-logout.cmd')
+  await writeFile(stub, '@echo off\r\nexit /b 0\r\n', 'utf8')
+
+  const service = new DingTalkBridgeService(makeCtx(), { dwsPath: stub, autoSuggest: false, autoReply: false })
+  service.tool = { ok: true, version: '1.0.68', error: '', checkedAt: Date.now() }
+  service.install = { ...service.install, status: 'ready', currentVersion: '1.0.68' }
+  service.state.profiles = [{ profile: 'p1', status: 'active', corpName: '星海科技', userName: '张三' }]
+  service.state.selfName = '张三'
+  service.stopAllListeners = async () => {}
+
+  const result = await service.logoutAll({ quiet: true })
+  const snap = service.snapshot()
+
+  assert.equal(result.ok, true)
+  // 关键：dws 依然可用，界面不该出现「dws 未就绪 / 未检测到 dws 命令」。
+  assert.equal(snap.tool.ok, true)
+  assert.equal(snap.tool.version, '1.0.68')
+  assert.equal(snap.install.status, 'ready')
+  // 登录态被清掉，并留下「请重新授权」的提示。
+  assert.equal(snap.profiles.length, 0)
+  assert.equal(snap.selfName, '')
+  assert.match(snap.loginNotice, /已退出钉钉登录/)
 })

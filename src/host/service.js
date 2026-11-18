@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.4.1-20261117T1810'
+export const HOST_BUILD = '0.4.2-20261118T0935'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -1115,12 +1115,12 @@ export class DingTalkBridgeService {
     this.state.profiles = []
     this.state.currentProfile = ''
     this.state.selfName = ''
-    this.tool = {
-      ok: false,
-      version: this.tool.version,
-      error: ok ? '已退出钉钉登录，点击「钉钉授权」重新登录' : `退出登录未成功：${describeFailure(result)}`,
-      checkedAt: Date.now(),
-    }
+    // 退出登录只影响「登录态」，跟 dws 本身能不能用无关：
+    // 以前这里把 tool.ok 置成 false，界面就会显示「dws 未就绪 / 未检测到 dws 命令」，
+    // 让人以为 dws 没装，还会去点「安装 dws」。现在只改登录提示。
+    this.state.loginNotice = ok
+      ? '已退出钉钉登录，点击右上角「钉钉授权」重新登录'
+      : `退出登录未成功：${describeFailure(result)}`
 
     if (!quiet) {
       this.login = {

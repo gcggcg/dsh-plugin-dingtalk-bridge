@@ -185,6 +185,7 @@ npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies
 | 点授权报错 `'dws' 不是内部或外部命令` / `spawn dws ENOENT` | 这台机器没装 dws。点「钉钉授权」时插件会先拦住并提示去安装；在提示卡或设置页点 **安装 dws** 即可：有 npm 走全局安装，**没有 npm 也能装**（直接下载 npm 包解压，自带解压器，并借用 DSH 自带的 Node 跑 `install.js`）。装完自动重新检测并开始接收。 |
 | 想升级 dws | 点提示卡或设置页的 **检查更新**（只查 npm 上的版本），发现新版后点 **更新到 vX**；npm 源慢就改 `dwsRegistry`（如 `https://registry.npmmirror.com/`）。 |
 | 卸载插件再装回来，又说「未安装 dws」 | 0.4.1 起会自动找回：`dws --version` 失败时插件会依次探测「配置的 `dwsPath` → 插件数据目录 `dws-runtime/…/vendor` → Node 同目录 `node_modules` → `%APPDATA%\npm` / `Program Files\nodejs`（macOS/Linux 为 `/usr/local/lib`、`/opt/homebrew/lib`、`/usr/lib`）→ PATH → `npm root -g`」，命中就写回 `dwsPath` 并落盘。装在哪、怎么彻底重装见使用说明 **10.0.1**；设置页「dws 路径」一行显示实际使用的可执行文件。 |
+| 点了「退出」之后提示「未检测到 dws 命令」 | 0.4.2 已修：退出登录只清登录态，不再把 `tool.ok` 置为 false。状态行显示黄点「未登录钉钉」，直接点「钉钉授权」重新登录即可。判断口诀：黄点「未登录钉钉」= 可以点授权；红点「dws 未就绪」= 才需要装 dws。详见使用说明 **10.1.3**。 |
 | 点「钉钉授权」后没有二维码 | **默认 loopback 模式本来就没有二维码**——弹框里是授权说明 + **打开钉钉授权页面** 按钮，浏览器会自动弹出授权页；没弹出就点 **复制链接**。只有 `loginMode=device` 才显示二维码。 |
 | 授权页要求输入授权码 | 说明 `loginMode` 是 `device`（设备流）。改回 `loopback` 并重启 DSH，即浏览器授权、无需授权码。 |
 | 每授权一次「实时监听中 · N 个组织」就多一个 | 钉钉登录态按组织累积。`loginReset: true`（默认）会在重新授权前先 `dws auth logout --yes` 退出全部旧组织，只保留本次登录的组织；想把现有组织清干净就点面板右上 **退出** 再重新授权。 |

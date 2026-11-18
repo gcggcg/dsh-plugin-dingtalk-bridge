@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.4.1'
+    const CLIENT_BUILD = '0.4.2'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -1368,9 +1368,11 @@ window.__ModuleLoader__.load({
         ? `正在安装 dws${install.targetVersion ? ` v${install.targetVersion}` : ''}${currentStep ? ` · ${currentStep.label}` : ''}`
         : failed
           ? 'dws 安装 / 更新失败'
-          : ready
-            ? `发现新版本 dws v${latest}（当前 v${current}）`
-            : '未检测到 dws 命令'
+          : status === 'missing'
+            ? '未检测到 dws 命令'
+            : ready
+              ? `发现新版本 dws v${latest}（当前 v${current}）`
+              : 'dws 暂时不可用'
 
       const body = installing
         ? `第 ${Math.min(doneCount + 1, steps.length || 1)}/${steps.length || 1} 步${currentStep && currentStep.detail ? ` · ${currentStep.detail}` : ''} · 已用时 ${elapsed}s。装完会自动重新检测并开始接收消息。`
