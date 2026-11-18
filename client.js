@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.4.2'
+    const CLIENT_BUILD = '0.4.3'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -954,6 +954,14 @@ window.__ModuleLoader__.load({
             )
           : null,
 
+        showComposer && !suggesting && suggestion === '' && message.suggestion && message.suggestion.ok === false
+          ? h(
+              'div',
+              { className: 'dsh-dt-hint', 'data-no-suggestion': '1', style: { marginTop: 8, color: C.warn } },
+              `模型没给出可发送的建议：${message.suggestion.reason || '需要你手动回复'}`,
+            )
+          : null,
+
         showComposer && !suggesting
           ? h(
               'div',
@@ -965,7 +973,13 @@ window.__ModuleLoader__.load({
                   value,
                   suggestion,
                   disabled: busy,
-                  placeholder: replied ? '已回复，可继续补充…' : message.kind === 'group' && groupReplyAt !== false ? `回复 @${message.sender}，Tab 补全建议…` : '输入回复，Tab 补全建议…',
+                  placeholder: replied
+                    ? '已回复，可继续补充…'
+                    : suggestion !== ''
+                      ? message.kind === 'group' && groupReplyAt !== false
+                        ? `回复 @${message.sender}，Tab 补全建议…`
+                        : '输入回复，Tab 补全建议…'
+                      : '模型没给出建议，请手动输入回复…',
                   onChange: setValue,
                   onSubmit: submit,
                   ariaLabel: `回复 ${message.sender}`,
@@ -2193,7 +2207,7 @@ window.__ModuleLoader__.load({
               value,
               suggestion,
               disabled: busy,
-              placeholder: '输入回复，Tab 补全建议…',
+              placeholder: suggestion !== '' ? '输入回复，Tab 补全建议…' : '模型没给出建议，请手动输入回复…',
               onChange: setValue,
               onSubmit: send,
               ariaLabel: '确认回复内容',

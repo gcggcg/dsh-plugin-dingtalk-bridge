@@ -207,12 +207,13 @@ npm i -g dsh-plugin-dingtalk-bridge@0.4.0   # 或装到 profile 的 dependencies
 | 来源（群 / 发送人）太多，胶囊被截断吗 | 不会。来源条只占一行：前 5 个 + 「还有 N 个 ▾」，点开是完整面板（可搜索、内滚、清除筛选），选中的来源置顶。 |
 | AI 回复好像只看一条消息，太片面 | 每个来源有独立滑动窗口（默认最近 5 条，`windowMessages` 可调），含对方连续发言与我发过的回复；没攒满时用钉钉最新 10 条补齐。刚换新联系人时上下文少是正常的。 |
 | 接口返回 401 / 403 | 401：钉钉登录态过期，点 **钉钉授权** 重新登录。403：被 DSH 的 Host/Origin 护栏拒绝（跨站或会话失效），刷新页面重开面板，不要绕过前端直接调接口。 |
+| 发送报「请求参数不能为空」/ 输入框里是一大段 JSON | 0.4.3 已修：模型返回 `reply: ""`（常见于看不见图片）时不再把整段 JSON 当草稿；卡片改为「需人工确认」并提示原因，输入框等你手写，宿主也会在发送前拦下「像 JSON 的正文」。 |
 
 ## 开发与自测
 
 ```bash
 npm run check                 # node --check 全部源码
-npm test                      # 单元测试：76 个用例，使用临时 DSH_HOME，不写真实状态
+npm test                      # 单元测试：94 个用例，使用临时 DSH_HOME，不写真实状态
 npm run smoke:index           # 校验 index.js 契约：Config 校验、prefix 路由注册、effect 数量、清理
 npm run smoke                 # 真机监听冒烟：dws 版本、profile、listener 状态、GET /state
 npm run smoke:login           # 两种授权模式：loopback（链接含 127.0.0.1、无授权码）→ device（授权码 + PNG 二维码）

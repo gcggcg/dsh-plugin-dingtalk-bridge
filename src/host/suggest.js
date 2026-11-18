@@ -105,6 +105,19 @@ export function parseSuggestion(text) {
         format: 'json',
       }
     }
+
+    // 模型按约定返回了 JSON，但 reply 是空串（典型：只有图片、它看不见图）。
+    // 这时绝不能把整段 JSON 当成草稿塞进输入框——那串东西既不是人话，
+    // 发到钉钉还会被当成结构化消息体，报「请求参数不能为空」。
+    return {
+      ok: false,
+      reply: '',
+      replies: [],
+      confidence: clampConfidence(payload.confidence ?? payload.score),
+      needsHuman: true,
+      reason: String(payload.reason ?? payload.note ?? '模型没有给出可发送的回复内容，需要你手动回复').slice(0, 240),
+      format: 'json-empty',
+    }
   }
 
   const fallback = cleanReply(raw)

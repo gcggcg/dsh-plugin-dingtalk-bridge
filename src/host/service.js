@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.4.2-20261118T0935'
+export const HOST_BUILD = '0.4.3-20261118T1410'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -54,6 +54,27 @@ export function looksLikeMissingCommand(text) {
   return /ENOENT|not recognized|不是内部或外部命令|command not found|无法将.{0,20}识别|No such file/i.test(
     String(text ?? ''),
   )
+}
+
+/**
+ * 判断一段回复正文是不是「模型返回的原始 JSON」。
+ *
+ * 为什么需要：dws 发消息时会把 `--text` 的值包进 `{"content": …}` 的结构化消息体，
+ * 如果正文本身就是一段 JSON（且没有 content 字段），服务端解析后内容为空，
+ * 就会报「请求参数不能为空」——用户完全看不懂这个错。
+ */
+export function looksLikeJsonEnvelope(text) {
+  const raw = String(text ?? '').trim()
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return false
+  try {
+    const payload = JSON.parse(raw)
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+    return ['reply', 'replies', 'needsHuman', 'needs_human', 'confidence', 'reason'].some(
+      (key) => key in payload,
+    )
+  } catch {
+    return false
+  }
 }
 
 function asBool(value, fallback) {
@@ -2202,10 +2223,12 @@ export class DingTalkBridgeService {
 
     // 手动触发的「换一条建议 / 生成建议」只更新建议本身，绝不代替用户发送。
     if (manual) {
-      current.status = result.ok ? 'suggested' : 'failed'
-      current.needsHuman = false
+      // 「模型按格式回了、但 reply 是空串」（例如它看不见图片）不是错误，
+      // 只是需要人来写，所以标成 needs-human，而不是刺眼的「处理失败」。
+      current.status = result.ok ? 'suggested' : result.format === 'json-empty' ? 'needs-human' : 'failed'
+      current.needsHuman = result.ok ? false : result.format === 'json-empty' && this.config.notifyModal
       current.dismissed = false
-      current.error = result.ok ? '' : result.reason
+      current.error = result.ok ? '' : result.format === 'json-empty' ? '' : result.reason
       this.broadcast()
       this.saveState().catch(() => {})
       return current
@@ -2225,9 +2248,10 @@ export class DingTalkBridgeService {
         })
       }
     } else {
-      current.status = result.ok ? 'suggested' : 'failed'
+      // 自动回复没开：有建议就等人确认（suggested），模型明确说「给不出」就标 needs-human。
+      current.status = result.ok ? 'suggested' : result.format === 'json-empty' ? 'needs-human' : 'failed'
       current.needsHuman = false
-      current.error = result.ok ? '' : result.reason
+      current.error = result.ok ? '' : result.format === 'json-empty' ? '' : result.reason
       // 自动回复在生成过程中被关闭、或这条消息早于本次开启时间：只留建议，不自动发送。
       if (this.state.autoReplyTouched && result.ok && !current.autoCancelled) {
         current.autoCancelled = !this.state.autoReply || !this.canAutoReply(current)
@@ -2244,6 +2268,24 @@ export class DingTalkBridgeService {
     const atSender = this.shouldAtSender(record)
     const body = composeReplyBody({ record, text, replyPrefix: this.config.replyPrefix, atSender })
     if (body === '') return false
+
+    // 防呆：模型偶尔会把整段 JSON 当正文返回（例如 reply 为空、只有 reason 的情况）。
+    // 那串东西发到钉钉会被当成结构化消息体，服务端直接报「请求参数不能为空」，
+    // 所以在这里拦下，换成一句人能看懂的错误。
+    if (looksLikeJsonEnvelope(body)) {
+      record.reply = {
+        text: body.slice(0, 400),
+        at: Date.now(),
+        atSender,
+        ok: false,
+        error: '回复内容看起来是模型的原始 JSON，不是能直接发送的文本。请点「换一条建议」，或手动输入回复后再发送。',
+        auto,
+      }
+      record.status = 'failed'
+      this.broadcast()
+      await this.saveState().catch(() => {})
+      return false
+    }
 
     // 自动回复在「模型思考的这几秒」里可能已被用户关掉，或这条消息早于本次开启时间：
     // 发之前再判一次状态，避免关掉开关后仍然把回复发出去。

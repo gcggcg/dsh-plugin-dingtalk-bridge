@@ -6,7 +6,7 @@ import { gzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { DingTalkBridgeService, buildSendArgs, composeReplyBody, detectMessageKind, extractEventText, extractImageRefs, buildInstallArgs, isDuplicateSendFailure, looksLikeMissingCommand, sniffImageMediaType, stripImageMarkers, planReplyParts } from '../src/host/service.js'
+import { DingTalkBridgeService, buildSendArgs, composeReplyBody, detectMessageKind, extractEventText, extractImageRefs, buildInstallArgs, isDuplicateSendFailure, looksLikeJsonEnvelope, looksLikeMissingCommand, sniffImageMediaType, stripImageMarkers, planReplyParts } from '../src/host/service.js'
 import { buildSuggestPrompt, buildStreamOptions, cleanReply, parseSuggestion } from '../src/host/suggest.js'
 import { createLineReader, describeFailure, parseLooseJson } from '../src/host/dws.js'
 import { extractTarGz, tarballUrl } from '../src/host/dws-tar.js'
@@ -1606,4 +1606,68 @@ test('退出登录只清登录态，不会把 dws 说成未安装', { skip: proc
   assert.equal(snap.profiles.length, 0)
   assert.equal(snap.selfName, '')
   assert.match(snap.loginNotice, /已退出钉钉登录/)
+})
+
+test('模型返回 reply 为空的 JSON 时，不会把整段 JSON 当成草稿', () => {
+  const raw =
+    '{"reply":"","confidence":0.0,"needsHuman":true,"reason":"对方发的是图片，无法识别图片内容，缺少判断依据，需要本人查看后回复"}'
+  const result = parseSuggestion(raw)
+  assert.equal(result.ok, false)
+  assert.equal(result.reply, '')
+  assert.deepEqual(result.replies, [])
+  assert.equal(result.format, 'json-empty')
+  assert.equal(result.needsHuman, true)
+  assert.match(result.reason, /图片/)
+  // 关键：草稿里绝不能出现 JSON 片段
+  assert.ok(!result.reply.includes('{'))
+})
+
+test('looksLikeJsonEnvelope 只拦「模型原始 JSON」，不误伤正常回复', () => {
+  assert.equal(looksLikeJsonEnvelope('{"reply":"","confidence":0}'), true)
+  assert.equal(looksLikeJsonEnvelope('  {"replies":["a"],"needsHuman":true}  '), true)
+  assert.equal(looksLikeJsonEnvelope('好的，我看一下'), false)
+  assert.equal(looksLikeJsonEnvelope('{"a":1}'), false)
+  assert.equal(looksLikeJsonEnvelope('{不是 json}'), false)
+})
+
+test('deliver 拒绝把模型原始 JSON 发到钉钉，并给出可读错误', async () => {
+  await useFreshHome()
+  const service = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  const record = {
+    id: 'msg-json-body',
+    kind: 'dm',
+    sender: '张三',
+    senderId: 'openIdZhangSan000000000000000000',
+    text: '你好',
+    at: Date.now(),
+    status: 'suggested',
+    images: [],
+  }
+  service.state.messages = [record]
+
+  const ok = await service.deliver(record, '{"reply":"","confidence":0.0,"needsHuman":true,"reason":"看不见图"}')
+  assert.equal(ok, false)
+  assert.equal(record.status, 'failed')
+  assert.equal(record.reply.ok, false)
+  assert.match(record.reply.error, /原始 JSON/)
+})
+
+test('send-reply 在没有建议也没有输入时直接拒绝，不去调用 dws', async () => {
+  await useFreshHome()
+  const service = new DingTalkBridgeService(makeCtx(), { autoSuggest: false, autoReply: false })
+  service.state.messages = [
+    {
+      id: 'msg-empty-reply',
+      kind: 'dm',
+      sender: '张三',
+      senderId: 'openIdZhangSan000000000000000000',
+      text: '你好',
+      at: Date.now(),
+      status: 'needs-human',
+      suggestion: { text: '', replies: [], ok: false, reason: '看不见图' },
+    },
+  ]
+  const result = await service.handleAction(makeCtx(), { type: 'send-reply', id: 'msg-empty-reply', text: '' })
+  assert.equal(result.ok, false)
+  assert.match(String(result.error), /回复内容为空/)
 })
