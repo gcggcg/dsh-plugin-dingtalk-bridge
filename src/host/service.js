@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.4.4-20261118T1430'
+export const HOST_BUILD = '0.4.5-20261118T1520'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -352,8 +352,9 @@ export class DingTalkBridgeService {
       autoReply: asBool(config.autoReply, false),
       autoSuggest: asBool(config.autoSuggest, true),
       minConfidence: asNumber(config.minConfidence, 0.72, 0, 1),
-      contextMessages: Math.round(asNumber(config.contextMessages, 6, 1, 12)),
+      contextMessages: Math.round(asNumber(config.contextMessages, 5, 1, 20)),
     // 每个消息来源（私信按发送人、群 @ 按群）各自维护的滑动窗口长度。
+    // 这个数字同时决定「存多少」和「喂给模型多少」——只有一个口径，避免两处配置打架。
     windowMessages: Math.round(asNumber(config.windowMessages, 5, 2, 20)),
       remoteContext: asBool(config.remoteContext, true),
       remoteContextLimit: Math.round(asNumber(config.remoteContextLimit, 10, 0, 30)),
@@ -378,6 +379,10 @@ export class DingTalkBridgeService {
       // 重新授权前先退出已登录组织，避免越授权越多组织（默认开启）。
       loginReset: asBool(config.loginReset, true),
     }
+
+    // 只留一个口径：喂给模型的条数始终等于滑动窗口大小。
+    // 配置里若还写着旧的 contextMessages，会被这里的窗口值覆盖（保持向后兼容，不再各调各的）。
+    this.config.contextMessages = this.config.windowMessages
 
     this.dshHomePath =
       process.env.DSH_HOME && process.env.DSH_HOME.trim() !== '' ? process.env.DSH_HOME : join(homedir(), '.dsh')
@@ -2060,8 +2065,8 @@ export class DingTalkBridgeService {
   }
 
   async buildHistory(record) {
-    // 窗口负责「存多少」，contextMessages 负责「喂多少」，两者取小。
-    const limit = Math.max(1, Math.min(this.config.windowMessages, this.config.contextMessages))
+    // 一个口径：窗口有多大，就喂多少条给模型（不再和 contextMessages 各算各的）。
+    const limit = Math.max(1, this.config.windowMessages)
 
     // 主来源：本来源自己的滑动窗口（含对方消息与我的回复，已按时间排序）。
     let entries = this.windowEntries(record).map((item) => ({ ...item }))
@@ -2648,9 +2653,11 @@ export class DingTalkBridgeService {
       }
 
       // 上下文窗口长度：每个来源各留最近 N 条，改动立即生效并落盘。
+      // 喂给模型的条数同步跟着变（只有一个口径，不存在「存 20 喂 6」）。
       case 'set-window-messages': {
         const size = Math.round(asNumber(payload.value, this.config.windowMessages, 2, 20))
         this.config.windowMessages = size
+        this.config.contextMessages = size
         for (const [key, entries] of this.windows.entries()) {
           this.windows.set(key, entries.slice(-size))
         }
@@ -2928,6 +2935,8 @@ export class DingTalkBridgeService {
         }
         if (typeof payload.windowMessages === 'number' && payload.windowMessages >= 2 && payload.windowMessages <= 20) {
           this.config.windowMessages = Math.round(payload.windowMessages)
+          // 读档后同样保持一个口径：喂多少条 == 窗口多大。
+          this.config.contextMessages = this.config.windowMessages
         }
         // 上次自动安装记下的 dws 路径：只在用户没显式配置（仍为默认 'dws'）时采用，
         // 并且必须真的存在，否则继续用 PATH 里的 dws。

@@ -45,16 +45,18 @@ export const Config = Schema.object({
 
   contextMessages: Schema.number()
     .min(1)
-    .max(12)
-    .default(6)
-    .description('生成建议回复时，一并提供给模型的同来源历史消息条数（上下文）。'),
+    .max(20)
+    .default(5)
+    .description(
+      '【已合并到 windowMessages】喂给模型的同来源历史条数。现在始终等于滑动窗口大小（窗口多大就喂多少条），填这个值不会生效，保留仅为兼容旧配置。要调上下文长度请改 windowMessages 或用收件箱顶部的「上下文窗口」下拉框。',
+    ),
 
   windowMessages: Schema.number()
     .min(2)
     .max(20)
     .default(5)
     .description(
-      '每个消息来源（私信按发送人、群 @ 按群）各自维护的滑动窗口长度。窗口只保留最近 N 条消息（含我的回复），新消息进来自动挤掉最早一条；AI 生成建议时只看本来源窗口里的内容，避免不同来源串味、也避免上下文过长。默认 5 条。',
+      '每个消息来源（私信按发送人、群 @ 按群）各自维护的滑动窗口长度，同时也是喂给模型的上下文条数。窗口只保留最近 N 条消息（含我的回复），新消息进来自动挤掉最早一条；AI 生成建议时只看本来源窗口里的内容，避免不同来源串味、也避免上下文过长。默认 5 条，范围 2–20。',
     ),
 
   remoteContext: Schema.boolean()

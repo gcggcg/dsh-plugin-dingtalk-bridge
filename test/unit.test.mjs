@@ -1671,3 +1671,40 @@ test('send-reply 在没有建议也没有输入时直接拒绝，不去调用 dw
   assert.equal(result.ok, false)
   assert.match(String(result.error), /回复内容为空/)
 })
+
+test('喂给模型的条数跟着滑动窗口走，旧的 contextMessages 不再生效', async () => {
+  await useFreshHome()
+  // 故意把 contextMessages 设成 1：按老逻辑只会喂 1 条，现在应该按窗口大小 4 条走。
+  const service = new DingTalkBridgeService(makeCtx(), {
+    autoSuggest: false,
+    windowMessages: 4,
+    contextMessages: 1,
+    remoteContext: false,
+  })
+  assert.equal(service.snapshot().contextMessages, 4)
+  assert.equal(service.config.contextMessages, service.config.windowMessages)
+
+  const base = Date.now() - 30_000
+  for (let i = 1; i <= 4; i += 1) {
+    service.ingest(
+      'profile-1',
+      dmEvent({ event_id: `w${i}`, message_id: `w${i}`, content: `第 ${i} 句`, create_time: base + i * 1000 }),
+    )
+  }
+  const record = service.state.messages.find((item) => item.messageId === 'w4')
+  const history = await service.buildHistory(record)
+  assert.deepEqual(
+    history.map((item) => item.text),
+    ['第 1 句', '第 2 句', '第 3 句'],
+  )
+
+  // 改窗口大小后，喂给模型的条数立刻跟着变（不再是两套数字）。
+  await service.handleAction(makeCtx(), { type: 'set-window-messages', value: 2 })
+  assert.equal(service.snapshot().windowMessages, 2)
+  assert.equal(service.snapshot().contextMessages, 2)
+  const shrunk = await service.buildHistory(record)
+  assert.deepEqual(
+    shrunk.map((item) => item.text),
+    ['第 3 句'],
+  )
+})

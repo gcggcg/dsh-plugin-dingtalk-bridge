@@ -80,7 +80,7 @@ DSH → 插件市场（Open Plugin Market）→ 搜索 `dsh-plugin-dingtalk-brid
 **方式三 · 手动装 npm 包**
 
 ```bash
-npm i -g dsh-plugin-dingtalk-bridge@0.4.4   # 或装到 profile 的 dependencies 里
+npm i -g dsh-plugin-dingtalk-bridge@0.4.5   # 或装到 profile 的 dependencies 里
 ```
 
 然后在 DSH profile 的 `package.json` 的 `dsh.profile.bundles` 里加入 `"dsh-plugin-dingtalk-bridge"`，执行 `pnpm install`，重启 DSH。
@@ -132,7 +132,7 @@ npm i -g dsh-plugin-dingtalk-bridge@0.4.4   # 或装到 profile 的 dependencies
 | `autoReply` | bool / `false` | 默认自动回复开关（界面上改过之后以界面为准）。 |
 | `autoSuggest` | bool / `true` | 收到消息后是否自动生成建议回复。 |
 | `minConfidence` | number / `0.72` | 自动回复的可信度阈值（0–1，界面滑杆 40%–100%）。 |
-| `contextMessages` | number / `6` | 喂给模型的上下文条数上限（1–12），与 `windowMessages` 取小。 |
+| `contextMessages` | number / `5` | **已合并到 `windowMessages`**：喂给模型的条数始终等于滑动窗口大小，填这个值不再生效（保留仅为兼容旧配置）。 |
 | `windowMessages` | number / `5` | 每个来源滑动窗口长度（2–20），收件箱顶部下拉框可直接改。 |
 | `remoteContext` | bool / `true` | 窗口没攒满时是否从钉钉拉取该会话最新消息补齐。 |
 | `remoteContextLimit` | number / `10` | 从钉钉拉取的条数（0–30，0=不拉）。 |

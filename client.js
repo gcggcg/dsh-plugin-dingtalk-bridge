@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.4.4'
+    const CLIENT_BUILD = '0.4.5'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -1098,7 +1098,7 @@ window.__ModuleLoader__.load({
       ],
       [
         '上下文',
-        '每个消息来源（私信按发送人、群 @ 按群）各有一条独立的滑动窗口，只保留最近 5 条：新消息进来就把最早一条挤出去。条数可在上方「自动回复」卡片里的「上下文窗口」下拉框直接改（2/3/5/8/10/15/20 条），也可以改配置项 windowMessages。生成建议时 AI 只看本来源窗口里的内容，所以不同群、不同人的对话不会串在一起；窗口还没攒满时会先用钉钉上该会话的最新消息补齐。',
+        '每个消息来源（私信按发送人、群 @ 按群）各有一条独立的滑动窗口，默认只保留最近 5 条：新消息进来就把最早一条挤出去。条数在上方「自动回复」卡片里的「上下文窗口」下拉框直接改（2/3/5/8/10/15/20 条），也可以改配置项 windowMessages —— 窗口多大，喂给模型的上下文就是多少条，只有一个数字。AI 只看本来源窗口里的内容，所以不同群、不同人的对话不会串在一起；窗口还没攒满时会先用钉钉上该会话的最新消息补齐。',
       ],
       ['阴影建议', '输入框里的浅灰文字是 AI 生成的建议回复：按 Tab 一键补全，也可以直接改写，回车或点「发送」发到钉钉。'],
       ['模型', '建议回复使用你在 DSH 里当前选中的大模型，收件箱卡片与设置页都会实时显示当前模型。'],
@@ -2527,14 +2527,14 @@ window.__ModuleLoader__.load({
           '上下文来源',
           state
             ? state.remoteContext
-              ? `钉钉最新 ${state.remoteContextLimit || 10} 条 + 本地记录，共取 ${state.contextMessages || 6} 条`
-              : `仅本地记录，取 ${state.contextMessages || 6} 条`
+              ? `钉钉最新 ${state.remoteContextLimit || 10} 条 + 本地记录，共取 ${state.windowMessages || 5} 条（= 窗口大小）`
+              : `仅本地记录，取 ${state.windowMessages || 5} 条（= 窗口大小）`
             : '—',
         ],
         [
           '上下文窗口',
           state
-            ? `每个来源独立维护最近 ${state.windowMessages || 5} 条（当前已跟踪 ${state.windowCount || 0} 个来源），新消息自动滑入、最早的滑出（收件箱顶部可调）`
+            ? `每个来源独立维护最近 ${state.windowMessages || 5} 条（当前已跟踪 ${state.windowCount || 0} 个来源），存多少就喂给模型多少（收件箱顶部可调）`
             : '—',
         ],
         [

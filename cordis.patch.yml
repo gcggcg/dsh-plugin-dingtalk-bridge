@@ -9,7 +9,7 @@
         autoReply: false
         autoSuggest: true
         minConfidence: 0.72
-        contextMessages: 6
+        contextMessages: 5
         windowMessages: 5
         remoteContext: true
         remoteContextLimit: 10
