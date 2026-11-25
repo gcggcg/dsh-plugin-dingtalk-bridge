@@ -21,7 +21,7 @@ import { buildSuggestPrompt, generateSuggestion, formatClock } from './suggest.j
 
 export const ROUTE_PREFIX = '/api/dingtalk-bridge'
 /** 每次改动宿主行为就换个标记：界面与 http-debug.log 都会带上，用来确认「跑的是新代码」。 */
-export const HOST_BUILD = '0.4.5-20261118T1520'
+export const HOST_BUILD = '0.4.6-20261125T1345'
 
 /** 私信（单聊）全部消息。 */
 const O2O_KEY = 'user_im_message_receive_o2o_all'
@@ -40,6 +40,13 @@ const DWS_PACKAGE = 'dingtalk-workspace-cli'
 const DWS_REGISTRY_DEFAULT = 'https://registry.npmjs.org/'
 const INSTALL_TIMEOUT = 300 * 1000
 const INSTALL_LOG_LIMIT = 4000
+
+// 面板上那行「v0.4.5 · ↓ 2.5k · ★ 6」的数据来源：npm 近 30 天下载量 + GitHub 星标。
+// 两者都是公开只读接口，失败时保留旧值（界面显示上一次的结果），绝不因为查不到而报错。
+const STATS_TTL = 10 * 60 * 1000
+const NPM_PACKAGE_NAME = 'dsh-plugin-dingtalk-bridge'
+const NPM_DOWNLOADS_URL = `https://api.npmjs.org/downloads/point/last-month/${NPM_PACKAGE_NAME}`
+const GITHUB_REPO_API = 'https://api.github.com/repos/gcggcg/dsh-plugin-dingtalk-bridge'
 
 /** 拼 `npm install -g` 的参数：只在用户点「安装 dws」时才会真正执行。 */
 export function buildInstallArgs({ target = '', registry = DWS_REGISTRY_DEFAULT } = {}) {
@@ -421,6 +428,9 @@ export class DingTalkBridgeService {
     }
     this.installPromise = null
     this.stepClock = new Map()
+    // 面板上的版本/下载量/星标行。downloads/stars 为 null 表示「还没查到」。
+    this.stats = { version: '', downloads: null, stars: null, checkedAt: 0, error: '' }
+    this.statsPromise = null
     this.login = { status: 'idle', code: '', url: '', qr: '', startedAt: 0, error: '', message: '' }
     this.loginChild = null
     this.listeners = new Map()
@@ -455,6 +465,7 @@ export class DingTalkBridgeService {
 
     this.setInterval(() => this.healthCheck(), HEALTH_INTERVAL)
     this.setInterval(() => this.pruneSeen(), 60 * 1000)
+    this.setInterval(() => this.refreshStats().catch(() => {}), STATS_TTL)
 
     return async () => {
       this.stopped = true
@@ -518,6 +529,8 @@ export class DingTalkBridgeService {
     this.refreshVision().catch(() => {})
     // 顺手查一下 npm 上的最新版本（只查不装），让「更新 dws」按钮能显示目标版本。
     this.checkLatestDws().catch(() => {})
+    // 面板上那行版本/下载量/星标：查不到就算了，不影响收消息。
+    this.refreshStats().catch(() => {})
     this.broadcast()
   }
 
@@ -621,9 +634,74 @@ export class DingTalkBridgeService {
     }
   }
 
+  /** 本插件自己的版本号（读包根的 package.json；读不到就退回构建号前缀）。 */
+  async ownVersion() {
+    try {
+      const text = await readFile(new URL('../../package.json', import.meta.url), 'utf8')
+      const version = String(JSON.parse(text)?.version ?? '').trim()
+      if (/^\d+\.\d+\.\d+/.test(version)) return version
+    } catch {
+      // 打包形态读不到就退回构建号，不抛错。
+    }
+    return String(HOST_BUILD).split('-')[0] || ''
+  }
+
+  /**
+   * 刷新面板上的「vX · ↓ 下载量 · ★ 星标」。
+   * 两个接口都是公开只读的；失败只记 error、保留上一次的数值，界面上少显示一段而已。
+   */
+  async refreshStats({ force = false } = {}) {
+    const fresh = Date.now() - Number(this.stats.checkedAt || 0) < STATS_TTL
+    if (!force && fresh && this.stats.version !== '') return this.stats
+    if (this.statsPromise) return this.statsPromise
+    this.statsPromise = (async () => {
+      const next = { ...this.stats }
+      const headers = { accept: 'application/json', 'user-agent': `dsh-plugin-dingtalk-bridge/${HOST_BUILD}` }
+      const problems = []
+      next.version = next.version || (await this.ownVersion())
+      const [downloads, stars] = await Promise.all([
+        (async () => {
+          try {
+            const res = await fetch(NPM_DOWNLOADS_URL, { headers, signal: AbortSignal.timeout(8000) })
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            const data = await res.json()
+            const value = Number(data?.downloads)
+            if (!Number.isFinite(value) || value < 0) throw new Error('返回里没有 downloads')
+            return Math.round(value)
+          } catch (error) {
+            problems.push(`npm 下载量：${String(error?.message || error)}`)
+            return null
+          }
+        })(),
+        (async () => {
+          try {
+            const res = await fetch(GITHUB_REPO_API, { headers, signal: AbortSignal.timeout(8000) })
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            const data = await res.json()
+            const value = Number(data?.stargazers_count)
+            if (!Number.isFinite(value) || value < 0) throw new Error('返回里没有 stargazers_count')
+            return Math.round(value)
+          } catch (error) {
+            problems.push(`GitHub 星标：${String(error?.message || error)}`)
+            return null
+          }
+        })(),
+      ])
+      if (downloads !== null) next.downloads = downloads
+      if (stars !== null) next.stars = stars
+      next.checkedAt = Date.now()
+      next.error = problems.join('；')
+      this.stats = next
+      this.broadcast()
+      return this.stats
+    })().finally(() => {
+      this.statsPromise = null
+    })
+    return this.statsPromise
+  }
+
   /** 依次尝试 npm_execpath、node 同目录的 npm、PATH 里的 npm、常见安装目录。 */
-  async findNpm() {
-    const candidates = []
+  async findNpm() {    const candidates = []
     const execPath = String(process.env.npm_execpath ?? '').trim()
     if (execPath !== '' && !/\.(?:c|m)?js$/i.test(execPath)) candidates.push(execPath)
     const nodeDir = dirname(process.execPath)
@@ -2735,9 +2813,15 @@ export class DingTalkBridgeService {
         await this.checkTool()
         await this.refreshProfiles()
         await this.refreshVision()
+        await this.refreshStats({ force: true })
         this.startAllListeners()
         this.broadcast()
         return { ok: true }
+      }
+
+      case 'refresh-stats': {
+        const stats = await this.refreshStats({ force: true })
+        return { ok: true, stats }
       }
 
       case 'install-dws': {
@@ -2829,6 +2913,7 @@ export class DingTalkBridgeService {
       multiSendMax: this.config.multiSendMax,
       multiSendDelayMs: this.config.multiSendDelayMs,
       dryRun: this.config.dryRun,
+      stats: this.stats,
       model: this.modelInfo(),
       login: this.login,
       listeners: [...this.listeners.values()].map((entry) => ({
