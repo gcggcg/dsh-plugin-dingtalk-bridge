@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 5000
     const SOFT_POLL_MS = 30000
     // 与 package.json 的 version 保持一致：宿主上报的 build 前缀对不上，说明 DSH 还在跑旧宿主代码。
-    const CLIENT_BUILD = '0.4.7'
+    const CLIENT_BUILD = '0.4.8'
     // 源码仓库（GitHub）：Star 与 Issue 入口都指向这里
     const REPO_URL = 'https://github.com/gcggcg/dsh-plugin-dingtalk-bridge'
     const ISSUES_URL = `${REPO_URL}/issues`
@@ -41,78 +41,6 @@ window.__ModuleLoader__.load({
           /* 忽略：无 window 环境（测试） */
         }
       }
-    }
-
-    /**
-     * 把下载量/星标压成人能一眼读完的短数字：2474 → 2.5k，13479 → 13.5k，6 → 6。
-     * 拿不到（null/undefined/非数字）时返回空串，界面上就少显示一段，不显示 0 误导人。
-     */
-    function formatCount(value) {
-      const number = Number(value)
-      if (!Number.isFinite(number) || number < 0) return ''
-      if (number < 1000) return String(Math.round(number))
-      const scaled = number < 10000 ? (number / 1000).toFixed(1) : String(Math.round(number / 1000))
-      return `${scaled.replace(/\.0$/, '')}k`
-    }
-
-    /**
-     * 面板上的「v0.4.5 · ↓ 2.5k · ★ 6」一行。
-     * 数据来自宿主的 snapshot().stats（npm 近 30 天下载量 + GitHub 星标，10 分钟缓存）。
-     */
-    function StatsLine(props) {
-      const stats = props && props.stats ? props.stats : {}
-      const version = String(stats.version ?? '').trim()
-      const downloads = formatCount(stats.downloads)
-      const stars = formatCount(stats.stars)
-      const parts = []
-      if (version !== '') {
-        parts.push(h('span', { key: 'v', className: 'dsh-dt-ver', title: '当前安装的插件版本' }, `v${version}`))
-      }
-      if (downloads !== '') {
-        parts.push(
-          h(
-            'a',
-            {
-              key: 'd',
-              href: NPM_URL,
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              title: `npm 上近 30 天的下载量：${Number(stats.downloads)}`,
-            },
-            `↓ ${downloads}`,
-          ),
-        )
-      }
-      if (stars !== '') {
-        parts.push(
-          h(
-            'a',
-            {
-              key: 's',
-              href: REPO_URL,
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              title: `GitHub 星标数：${Number(stats.stars)}`,
-            },
-            `★ ${stars}`,
-          ),
-        )
-      }
-      if (parts.length === 0) return null
-      const withDots = []
-      parts.forEach((part, index) => {
-        if (index > 0) withDots.push(h('span', { key: `dot-${index}`, className: 'dsh-dt-dot2' }, '·'))
-        withDots.push(part)
-      })
-      return h(
-        'span',
-        {
-          className: 'dsh-dt-stats',
-          'data-block': props && props.block ? '1' : '0',
-          title: stats.error ? `部分数据没取到：${stats.error}` : '版本 · npm 下载量 · GitHub 星标',
-        },
-        withDots,
-      )
     }
 
     // ------------------------------------------------------------------ 设计令牌
@@ -142,18 +70,6 @@ window.__ModuleLoader__.load({
 .dsh-dt-title{font-size:15px;font-weight:650;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
 .dsh-dt-sub{font-size:11.5px;color:${C.sub};display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
 .dsh-dt-spacer{flex:1}
-.dsh-dt-footnote{font-size:11.5px;color:${C.sub};opacity:.85;white-space:nowrap}
-.dsh-dt-links{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:12px;
-  border-top:1px dashed ${C.border1};font-size:12px;color:${C.sub}}
-.dsh-dt-links a{color:${C.brand};text-decoration:none;display:inline-flex;align-items:center;gap:4px}
-.dsh-dt-links a:hover{text-decoration:underline}
-.dsh-dt-stats{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:${C.sub};white-space:nowrap}
-.dsh-dt-stats[data-block="1"]{font-size:12px;gap:10px}
-.dsh-dt-stats .dsh-dt-ver{font-weight:600;color:${C.text}}
-.dsh-dt-stats a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:1px 4px;
-  border-radius:6px;transition:.14s}
-.dsh-dt-stats a:hover{color:${C.brand};background:rgba(46,124,246,.08)}
-.dsh-dt-stats .dsh-dt-dot2{opacity:.45}
 .dsh-dt-toolbar{display:flex;align-items:center;gap:10px;padding:10px 20px;flex-wrap:wrap;
   border-bottom:1px solid ${C.border1};background:${C.bg}}
 .dsh-dt-tabs{display:flex;gap:2px;padding:2px;background:${C.layer2};border-radius:9px;border:1px solid ${C.border1}}
@@ -1191,7 +1107,7 @@ window.__ModuleLoader__.load({
       ['3', '按需调整阈值', '滑杆越高越保守：只有置信度达到阈值的建议才会自动发出，其余一律转人工确认；拖动即时生效并自动保存。'],
     ]
 
-    function HelpContent(props) {
+    function HelpContent() {
       return h(
         'div',
         { className: 'dsh-dt-help' },
@@ -1233,7 +1149,6 @@ window.__ModuleLoader__.load({
             '🐞 提交 Issue',
           ),
           h('a', { href: NPM_URL, target: '_blank', rel: 'noopener noreferrer', title: '在 npm 上查看版本与安装信息' }, 'npm'),
-          h(StatsLine, { stats: props && props.stats, block: true }),
           h('span', null, '欢迎点赞或反馈问题'),
         ),
       )
@@ -1846,7 +1761,6 @@ window.__ModuleLoader__.load({
             },
             '提交 Issue',
           ),
-          h(StatsLine, { stats: state && state.stats }),
         ),
 
         h(DwsInstallCard, {
@@ -2089,7 +2003,7 @@ window.__ModuleLoader__.load({
                   '返回收件箱',
                 ),
               ),
-              h(HelpContent, { stats: state && state.stats }),
+              h(HelpContent),
             )
           : null,
 
@@ -2769,7 +2683,7 @@ window.__ModuleLoader__.load({
           h(Button, { size: 'sm', onClick: () => postAction({ type: 'restart-listeners' }) }, '重启监听'),
         ),
         h('div', { style: { fontSize: 12, fontWeight: 620, marginTop: 18 } }, '使用说明'),
-        h(HelpContent, { stats: state && state.stats }),
+        h(HelpContent),
         h(
           'div',
           { style: { fontSize: 11.5, color: C.sub, marginTop: 14, lineHeight: 1.6 } },
